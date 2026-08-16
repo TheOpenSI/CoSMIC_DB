@@ -1,4 +1,5 @@
 ### Core modules ###
+from uuid import uuid7
 from pydantic import (
     BaseModel,
     ConfigDict
@@ -7,6 +8,7 @@ from pydantic import (
 
 ### Type hints ###
 from pydantic.types import (
+    UUID7,
     AwareDatetime,
     PositiveInt
 )
@@ -16,7 +18,7 @@ from pydantic.types import (
 from ..cores.db import cosmic_db_configs
 from ..cores.globals import (
     USER_ROLE,
-    LLM_ROLE,
+    LLM_ROLE
 )
 
 
@@ -74,14 +76,12 @@ class ChatHistorySchema(BaseModel):
     """docstring for ChatHistorySchema."""
     model_config = ConfigDict(extra="forbid")
 
-    # NOTE:
-    # If edit/share convo pairs feature added, then we can use 'convo_pair_id'
-    # UUID value.
+    request_pair_id:    UUID7 = uuid7()
     user_role:          str = USER_ROLE # NOTE: per agreed solution from our team
     user_query:         str
     query_create_on:    AwareDatetime
     llm_role:           str = LLM_ROLE  # NOTE: per agreed solution from our team
     llm_response:       str
     response_create_on: AwareDatetime
-    input_token:        PositiveInt # For final response received from `/cosmic (POST)` endpoint
-    output_token:       PositiveInt # For final response received from `/cosmic (POST)` endpoint
+    input_token:        PositiveInt     # For final response received from `/cosmic (POST)` endpoint
+    output_token:       PositiveInt     # For final response received from `/cosmic (POST)` endpoint
