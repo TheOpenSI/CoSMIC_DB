@@ -35,17 +35,3 @@ class EmissionFilterParams(BaseModel):
 
     user_id:        UUID7 | None = Field(default=None)
     emission_id:    UUID7 | None = Field(default=None)
-
-
-class TokenFilterParams(BaseModel):
-    # NOTE:
-    # There wasn't any clear explanation on FastAPI docs when they use this in
-    # one of the examples. Take a look at linked Pydantic docs here for more
-    # detail:
-    # https://pydantic.dev/docs/validation/latest/api/pydantic/config/#pydantic.config.ConfigDict.extra
-    # https://fastapi.tiangolo.com/tutorial/query-param-models/#forbid-extra-query-parameters
-    model_config = {"extra": "forbid"}
-
-    user_id:            UUID7 | None = Field(default=None)
-    chat_session_id:    UUID7 | None = Field(default=None)
-    request_pair_id:    UUID7 | None = Field(default=None)

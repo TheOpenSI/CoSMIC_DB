@@ -1,28 +1,27 @@
 ### Core modules ###
-from uuid import UUID
 from fastapi import (
     APIRouter,
-    Query,
     status
 )
 
 
 ### Type hints ###
-from typing import (
-    Annotated,
-    Any
-)
+from typing import Any
+from pydantic.types import UUID7
 from ...types.tags import APITag
-from ...types.filter_params import TokenFilterParams
 
 
 ### Internal modules ###
+from ...cores.db import SessionDependency
 from ...cores.globals import OPENAPI_GET_EXTRA_RESPONSES
 from ...types.api_responses.tokens import (
     # For client responses (Responses Model)
-    TokensPublicResponse,
-    TokenPublicResponse
+    SystemTokenPublicResponse,
+    UserTokenPublicResponse,
+    ChatboxSessionTokenPublicResponse,
+    InquiryCycleTokenPublicResponse
 )
+
 
 
 tokens_v1_router: APIRouter = APIRouter(
@@ -32,40 +31,75 @@ tokens_v1_router: APIRouter = APIRouter(
 
 
 @tokens_v1_router.get(
-    path="/",
+    path="/system",
     status_code=status.HTTP_200_OK,
-    response_model=TokensPublicResponse | TokenPublicResponse,
+    response_model=SystemTokenPublicResponse,
     responses={**OPENAPI_GET_EXTRA_RESPONSES}
 )
-async def read_tokens_v1(
-    filter_query: Annotated[
-        TokenFilterParams,
-        Query(
-            title="Tokens Filter",
-            description="filter by user ID, chat session ID, or request pair ID.",
-            strict=True
-        )
-    ]
+async def read_system_token_v1(
+    session: SessionDependency
 ) -> Any:
-    # Get only the filter data that were actually provided by the client
-    token_filter_data: dict[str, UUID] = filter_query.model_dump(exclude_unset=True)
+    return {
+        "success": True,
+        "result": {
+            "system_input_token": 400,
+            "system_output_token": 40
+        }
+    }
 
-    # If ANY filter data is present, handle the filtered response
-    if token_filter_data:
-        return {
-            "success": True,
-            "result": {
-                "user_id": filter_query.user_id,
-                "chat_session_id": filter_query.chat_session_id,
-                "request_pair_id": filter_query.request_pair_id,
-                "input_token": 1,
-                "output_token": 1,
-            }
+
+@tokens_v1_router.get(
+    path="/user/{user_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=UserTokenPublicResponse,
+    responses={**OPENAPI_GET_EXTRA_RESPONSES}
+)
+async def read_user_token_v1(
+    user_id: UUID7,
+    session: SessionDependency
+) -> Any:
+    return {
+        "success": True,
+        "result": {
+            "user_input_token": 300,
+            "user_output_token": 30
         }
-    else:
-        # Otherwise, perform the general GET (no filters applied)
-        return {
-            "success": True,
-            "count": 0,
-            "result": []
+    }
+
+
+@tokens_v1_router.get(
+    path="/chatbox/{chatbox_session_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=ChatboxSessionTokenPublicResponse,
+    responses={**OPENAPI_GET_EXTRA_RESPONSES}
+)
+async def read_chatbox_session_token_v1(
+    chatbox_session_id: UUID7,
+    session: SessionDependency
+) -> Any:
+    return {
+        "success": True,
+        "result": {
+            "chatbox_session_input_token": 200,
+            "chatbox_session_output_token": 20
         }
+    }
+
+
+@tokens_v1_router.get(
+    path="/inquiry/{inquiry_cycle_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=InquiryCycleTokenPublicResponse,
+    responses={**OPENAPI_GET_EXTRA_RESPONSES}
+)
+async def read_inquiry_cycle_token_v1(
+    inquiry_cycle_id: UUID7,
+    session: SessionDependency
+) -> Any:
+    return {
+        "success": True,
+        "result": {
+            "inquiry_cycle_input_token": 100,
+            "inquiry_cycle_output_token": 10
+        }
+    }

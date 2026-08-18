@@ -9,23 +9,41 @@ from pydantic import (
 
 
 ### Internal modules ###
-from ...apis.data_models.tokens import TokenPublic
+from ...apis.data_models.tokens import (
+    SystemTokenPublic,
+    UserTokenPublic,
+    ChatboxSessionTokenPublic,
+    InquiryCycleTokenPublic
+)
 
 
 
 """
 Client responses format according to FE requirements.
 """
-class TokensPublicResponse(BaseModel):
+class SystemTokenPublicResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     success:    bool
-    count:      int
-    result:     list[TokenPublic]
+    result:     SystemTokenPublic
 
 
-class TokenPublicResponse(BaseModel):
+class UserTokenPublicResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     success:    bool
-    result:     TokenPublic
+    result:     UserTokenPublic
+
+
+class ChatboxSessionTokenPublicResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    success:    bool
+    result:     ChatboxSessionTokenPublic
+
+
+class InquiryCycleTokenPublicResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    success:    bool
+    result:     InquiryCycleTokenPublic
