@@ -1,5 +1,4 @@
 ### Core modules ###
-from uuid import uuid7
 from pydantic import (
     BaseModel,
     ConfigDict
@@ -76,7 +75,7 @@ class ChatHistorySchema(BaseModel):
     """docstring for ChatHistorySchema."""
     model_config = ConfigDict(extra="forbid")
 
-    request_pair_id:    UUID7 = uuid7()
+    inquiry_cycle_id:   UUID7
     user_role:          str = USER_ROLE # NOTE: per agreed solution from our team
     user_query:         str
     query_create_on:    AwareDatetime
