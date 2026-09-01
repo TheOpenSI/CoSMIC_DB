@@ -4,6 +4,20 @@
   "registrationAllowed": true,
   "loginWithEmailAllowed": true,
   "resetPasswordAllowed": true,
+  "verifyEmail" : true,
+  "smtpServer": {
+    "host": "smtp.gmail.com",
+    "port": 587,
+    "from": "${KEYCLOAK_SMTP_USER}",
+    "fromDisplayName": "CoSMIC",
+    "replyTo  ": "",
+    "starttls": "true",
+    "auth": "true",
+    "user": "${KEYCLOAK_SMTP_USER}",
+    "password": "${KEYCLOAK_SMTP_PWD}",
+    "ssl": "false"
+
+  },
   "roles": {
     "realm": [
       { "name": "admin" },
