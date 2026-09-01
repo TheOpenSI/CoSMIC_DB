@@ -2,7 +2,7 @@ import secrets
 
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse,HTMLResponse
 from cores.db import SessionDependency
 from auth.users_sync import ensure_user
 
@@ -59,6 +59,21 @@ async def callback_provider(
     state: str | None = None,
     error: str | None = None,
 ) -> RedirectResponse:
+
+    try:
+        cosmic_session.read_session(request)
+        # Already logged in to avoid double callback 
+        return HTMLResponse(
+            content="""<!doctype html>
+    <html><body style="font-family:sans-serif;padding:2rem">
+    <h1>Already signed in</h1>
+    </body></html>""",
+            status_code=200,
+        )
+    except HTTPException:
+        pass
+
+
     if error:
         return RedirectResponse(
             url=f"{config.FRONTEND_URL}/login?error={error}",
