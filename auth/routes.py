@@ -67,6 +67,7 @@ async def callback_provider(
             content="""<!doctype html>
     <html><body style="font-family:sans-serif;padding:2rem">
     <h1>Already signed in</h1>
+    <script>window.close();</script>
     </body></html>""",
             status_code=200,
         )
