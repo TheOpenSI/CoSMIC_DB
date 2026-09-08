@@ -67,6 +67,7 @@ async def callback_provider(
             content="""<!doctype html>
     <html><body style="font-family:sans-serif;padding:2rem">
     <h1>Already signed in</h1>
+    <p>You can close this tab and continue in the other window.</p>
     <script>window.close();</script>
     </body></html>""",
             status_code=200,
