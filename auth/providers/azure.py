@@ -26,6 +26,7 @@ class AzureProvider:
             "scope": "openid profile email offline_access",
             "redirect_uri": redirect_uri,
             "state": state,
+            "prompt": "select_account",
         }
         return f"{config.AZURE_AD_AUTH_URL}?{urlencode(params)}"
         
@@ -41,6 +42,7 @@ class AzureProvider:
             "code": code,
             "redirect_uri": redirect_uri,
             "grant_type": "authorization_code",
+            "scope": "openid profile email offline_access",
         }
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
