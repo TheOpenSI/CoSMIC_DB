@@ -42,7 +42,7 @@ def set_session_cookie(response: Response, claims: NormalizedClaims,user_id: UUI
     response.set_cookie(
         config.SESSION_COOKIE_NAME,
         token,
-        **_cookie_kwargs(config.SESSION_MAX_AGE),
+        **_cookie_kwargs(config.REFRESH_COOKIE_MAX_AGE),
     )
 
 
@@ -67,3 +67,23 @@ def read_session(request: Request) -> dict:
         raise HTTPException(
             status_code=401, detail="Invalid or expired session"
         ) from exc
+
+def read_session_allowed_expired(request: Request) -> dict:
+
+    #This endpoint only for refresh token and only designed beacuse google idp dosent give id_token on hitting refresh token endpoint
+    token = request.cookies.get(config.SESSION_COOKIE_NAME)
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        return jwt.decode(
+            token,
+            config.SESSION_SECRET,
+            algorithms=["HS256"],
+            options={
+                "require": ["exp","iat","sub"],
+                "verify_exp": False}, # Allow expired tokens to be read
+
+        )
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail="Invalid session") from exc
