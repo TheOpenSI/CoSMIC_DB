@@ -1,6 +1,11 @@
 {
   "realm": "cosmic",
   "enabled": true,
+  "ssoSessionIdleTimeout": 86400,
+  "ssoSessionMaxLifespan": 86400,
+  "clientSessionIdleTimeout": 86400,
+  "clientSessionMaxLifespan": 86400,
+  "accessTokenLifespan": 300,
   "registrationAllowed": true,
   "loginWithEmailAllowed": true,
   "resetPasswordAllowed": true,

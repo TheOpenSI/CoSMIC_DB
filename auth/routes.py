@@ -1,13 +1,15 @@
 import secrets
+from uuid import UUID
 
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import RedirectResponse,HTMLResponse
+from fastapi.responses import RedirectResponse,HTMLResponse ,JSONResponse
 from cores.db import SessionDependency
 from auth.users_sync import ensure_user
 
 from auth import config
 from auth.providers import get_provider, list_enabled_providers
+from auth.providers.base import NormalizedClaims
 from auth import session as cosmic_session
 
 auth_router = APIRouter(prefix=config.AUTH_API_PREFIX, tags=["auth"])
@@ -96,10 +98,11 @@ async def callback_provider(
     response = RedirectResponse(url=f"{config.FRONTEND_URL}/chat", status_code=302)
     response.delete_cookie(config.OAUTH_STATE_COOKIE, path="/")
     # keep provider cookie for logout routing (or re-set it below)
+    refresh_max_age = tokens.refresh_expires_in or config.REFRESH_COOKIE_MAX_AGE
     response.set_cookie(
         config.OAUTH_PROVIDER_COOKIE,
         provider,
-        max_age=config.SESSION_MAX_AGE,
+        max_age=refresh_max_age,
         **_cookie_kwargs(),
     )
     # ★ Cosmic session (source of truth for /me)
@@ -109,7 +112,7 @@ async def callback_provider(
         response.set_cookie(
             config.REFRESH_TOKEN_COOKIE,
             tokens.refresh_token,
-            max_age=tokens.refresh_expires_in or 1800,
+            max_age=refresh_max_age,
             **_cookie_kwargs(),
         )
     # Stop treating IdP access_token as the app session (Phase 1)
@@ -133,6 +136,60 @@ async def logout(request: Request) -> RedirectResponse:
     response.delete_cookie(config.OAUTH_PROVIDER_COOKIE, path="/")
     response.delete_cookie(config.OAUTH_STATE_COOKIE, path="/")
     return response
+
+@auth_router.post("/refresh")
+async def refresh(request: Request) -> JSONResponse:
+    refresh_token = request.cookies.get(config.REFRESH_TOKEN_COOKIE)
+    provider_name = request.cookies.get(config.OAUTH_PROVIDER_COOKIE)
+    if not refresh_token or not provider_name:
+        raise HTTPException(status_code=401, detail="No refresh token or provider name found")
+    idp = get_provider(provider_name)
+
+    old = cosmic_session.read_session_allowed_expired(request)
+
+    try : 
+
+        tokens = await idp.refresh(refresh_token)
+    except HTTPException:
+        raise HTTPException(status_code=401, detail="Token refresh failed")
+
+    try : 
+        claims = idp.normalize_claims(tokens)
+    except HTTPException:
+        claims = NormalizedClaims(
+            provider=old.get("provider") or provider_name,
+            sub=old["sub"],
+            email=old.get("email"),
+            name=old.get("name"),
+            roles=old.get("roles") or [],
+        )
+
+    user_id = UUID(str(old["user_id"]))
+
+    response = JSONResponse({"ok": True})
+
+    cosmic_session.set_session_cookie(response, claims, user_id)
+    # refresh_max_age = tokens.refresh_expires_in or config.REFRESH_COOKIE_MAX_AGE
+
+
+    if tokens.refresh_token and tokens.refresh_token != refresh_token:
+        refresh_max_age = tokens.refresh_expires_in or config.REFRESH_COOKIE_MAX_AGE
+        response.set_cookie(
+            config.REFRESH_TOKEN_COOKIE,
+            tokens.refresh_token,
+            max_age=refresh_max_age,
+            **_cookie_kwargs(),
+        )
+        response.set_cookie(
+            config.OAUTH_PROVIDER_COOKIE,
+            provider_name,
+            max_age=refresh_max_age,
+            **_cookie_kwargs(),
+        )
+    return response
+
+    
+    
 
 
 @auth_router.get("/me")

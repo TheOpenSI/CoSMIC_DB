@@ -35,3 +35,6 @@ class OAuthProvider(Protocol):
 
     async def logout(self, refresh_token: str | None) -> None:
         """Optional IdP-side logout."""
+
+    async def refresh(self, refresh_token: str) -> TokenBundle:
+        """Refresh the access token."""

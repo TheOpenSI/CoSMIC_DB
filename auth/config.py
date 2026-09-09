@@ -17,7 +17,9 @@ ENABLED_PROVIDERS = [
 
 SESSION_SECRET = cosmic_auth_configs.get("SESSION_SECRET")
 SESSION_COOKIE_NAME = cosmic_auth_configs.get("SESSION_COOKIE_NAME", "cosmic_session")
-SESSION_MAX_AGE = int(cosmic_auth_configs.get("SESSION_MAX_AGE") or "86400")
+SESSION_MAX_AGE = int(cosmic_auth_configs.get("SESSION_MAX_AGE"))
+REFRESH_COOKIE_MAX_AGE = int(cosmic_auth_configs.get("REFRESH_COOKIE_MAX_AGE") or "86400")
+
 
 # Legacy IdP token cookies (Phase 0–1). Cosmic session comes in Phase 1.
 ACCESS_TOKEN_COOKIE = "cosmic_access_token"
