@@ -23,7 +23,7 @@ class AzureProvider:
         params = {
             "client_id": config.AZURE_AD_CLIENT_ID,
             "response_type": "code",
-            "scope": "openid profile email",
+            "scope": "openid profile email offline_access",
             "redirect_uri": redirect_uri,
             "state": state,
         }
@@ -81,7 +81,7 @@ class AzureProvider:
                 signing_key.key,
                 algorithms=["RS256"],
                 audience=config.AZURE_AD_CLIENT_ID,
-                issuer=config.AZURE_AD_ISSUER
+                #issuer=config.AZURE_AD_ISSUER
             )
         except jwt.PyJWTError as e:
             raise HTTPException(status_code=500, detail="Failed to decode id_token")
