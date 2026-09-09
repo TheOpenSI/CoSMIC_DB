@@ -1,19 +1,17 @@
 ### Core modules ###
-from pydantic.types import UUID7
-from sqlmodel import (
-    Field,
-    SQLModel
-)
-
+from pydantic import BaseModel
+from sqlmodel import Field
 
 
 ### Type hints ###
+from pydantic.types import UUID7
 
 
 ### Internal modules ###
 
 
-class ServiceFilterParams(SQLModel):
+
+class ServiceFilterParams(BaseModel):
     # NOTE:
     # There wasn't any clear explanation on FastAPI docs when they use this in
     # one of the examples. Take a look at linked Pydantic docs here for more
@@ -26,7 +24,7 @@ class ServiceFilterParams(SQLModel):
     memory_enable:  bool | None = Field(default=None)
 
 
-class EmissionFilterParams(SQLModel):
+class EmissionFilterParams(BaseModel):
     # NOTE:
     # There wasn't any clear explanation on FastAPI docs when they use this in
     # one of the examples. Take a look at linked Pydantic docs here for more

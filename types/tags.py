@@ -20,3 +20,4 @@ class APITag(Enum):
     config      = "Configurations API Endpoint"
     chatbox     = "Chatboxes API Endpoint"
     emission    = "Emissions API Endpoint"
+    token       = "Tokens API Endpoint"
