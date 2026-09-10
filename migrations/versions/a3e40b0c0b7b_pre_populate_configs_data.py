@@ -47,7 +47,7 @@ class GeneralConfigs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider:               str         = "ollama"
-    model:                  str         = "qwen2.5:7b"
+    model:                  str         = "qwen2.5:0.5b"
     is_quantised:           bool        = False
     seed:                   int         = 0
     default_knowledge_path: str         = "/app/data/default/"

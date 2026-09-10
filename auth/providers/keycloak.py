@@ -108,3 +108,36 @@ class KeycloakProvider:
                     "refresh_token": refresh_token,
                 },
             )
+    async def refresh(self, refresh_token: str) -> TokenBundle:
+        token_url = (
+            f"{config.KEYCLOAK_INTERNAL_URL}/realms/{config.KEYCLOAK_REALM}"
+            "/protocol/openid-connect/token"
+        )
+        data = {
+            "grant_type": "refresh_token",
+            "client_id": config.KEYCLOAK_CLIENT_ID,
+            "client_secret": config.KEYCLOAK_CLIENT_SECRET,
+            "refresh_token": refresh_token,
+        }
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(token_url, data=data)
+
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=401,
+                detail=f"Keycloak token refresh failed: {resp.text}",
+            )
+
+        payload = resp.json()
+        access_token = payload.get("access_token")
+        if not access_token:
+            raise HTTPException(status_code=502, detail="No access token returned")
+
+        return TokenBundle(
+            access_token=access_token,
+            refresh_token=payload.get("refresh_token") or refresh_token,
+            id_token=payload.get("id_token"),
+            expires_in=payload.get("expires_in", 300),
+            refresh_expires_in=payload.get("refresh_expires_in"),
+            raw=payload,
+        )
