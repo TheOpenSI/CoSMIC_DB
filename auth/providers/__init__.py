@@ -4,10 +4,12 @@ from auth import config
 from auth.providers.base import OAuthProvider
 from auth.providers.google import GoogleProvider
 from auth.providers.keycloak import KeycloakProvider
+from auth.providers.azure import AzureProvider
 
 _PROVIDERS: dict[str, OAuthProvider] = {
     "keycloak": KeycloakProvider(),
     "google": GoogleProvider(),
+    "azure": AzureProvider(),
 }
 
 
