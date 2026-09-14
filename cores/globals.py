@@ -15,7 +15,7 @@ from typing import Any
 
 USER_ROLE:      str             = 'user'
 LLM_ROLE:       str             = 'assistant'
-SYSTEM_ROLES:   tuple[str, str] = ("admin", "user")
+SYSTEM_ROLES:   tuple[str, ...] = ("admin", "user")
 
 
 OPENAPI_GET_EXTRA_RESPONSES: dict[int | str, dict[str, Any]] = {
