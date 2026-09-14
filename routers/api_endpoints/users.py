@@ -135,7 +135,7 @@ async def create_user_v1(
                     status_code=status.HTTP_409_CONFLICT,
                     detail={
                         "status": "409 - Conflict",
-                        "message": f"An user with '{user_stored_email[1]}' email has been registered."
+                        "message": f"An user with [{user_stored_email[1]}] email has been registered."
                         }
                     )
 
@@ -303,7 +303,7 @@ async def update_user_v1(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
                     "status": "409 - Conflict",
-                    "message": f"An user with '{user_stored_email[1]}' email has been registered."
+                    "message": f"An user with [{user_stored_email[1]}] email has been registered."
                 }
             )
 
