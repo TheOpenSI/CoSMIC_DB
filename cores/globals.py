@@ -12,6 +12,13 @@ from datetime import datetime, timezone
 
 USER_ROLE:  str = 'user'
 LLM_ROLE:   str = 'assistant'
+CORE_SERVICES: tuple[str, ...] = (
+    "chess",
+    "memory",
+    "code_generation",
+    "general_question_answering",
+    "academic_governance"
+)
 
 
 OPENAPI_GET_EXTRA_RESPONSES: dict[int | str, dict[str, Any]] = {
