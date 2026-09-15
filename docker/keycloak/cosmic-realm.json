@@ -15,7 +15,6 @@
     "port": 587,
     "from": "${KEYCLOAK_SMTP_USER}",
     "fromDisplayName": "CoSMIC",
-    "replyTo  ": "",
     "starttls": "true",
     "auth": "true",
     "user": "${KEYCLOAK_SMTP_USER}",
