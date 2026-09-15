@@ -4,19 +4,13 @@ from fastapi import (
     HTTPException,
     status
 )
-from sqlmodel import (
-    or_,
-    select
-)
+from sqlmodel import select
 from sqlalchemy.sql.dml import Update
 from sqlalchemy.sql.expression import update
 
 
 ### Type hints ###
-from typing import (
-    Any,
-    Sequence
-)
+from typing import Any
 from ...types.tags import APITag
 from pydantic.types import UUID7
 from sqlalchemy.exc import IntegrityError
@@ -122,7 +116,7 @@ async def create_config_v1(
                     status_code=status.HTTP_409_CONFLICT,
                     detail={
                         "status": "409 - Conflict",
-                        "message": f"'{config_stored_name[1]}' config preset has been created."
+                        "message": f"[{config_stored_name[1]}] config preset has been created."
                         }
                     )
 
@@ -158,7 +152,7 @@ async def create_config_v1(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
                     "status": "409 - Conflict",
-                    "message": f"Exact '{config_stored_details[1]}' setting from one of the config preset has been found."
+                    "message": f"Exact [{config_stored_details[1]}] setting from one of the config preset has been found."
                     }
                 )
 
@@ -235,7 +229,10 @@ async def update_config_v1(
     session: SessionDependency
 ) -> Any:
     try:
-        config_db: Configurations | None = session.get(entity=Configurations, ident=config_id)
+        config_db: Configurations | None = session.get(
+            entity=Configurations,
+            ident=config_id
+        )
 
         if config_db is None:
             raise HTTPException(
@@ -243,140 +240,202 @@ async def update_config_v1(
                 detail="Configuration Not Found!"
             )
 
-        else:
-            config_data: dict[str, Any] = config.model_dump(mode="json", exclude_unset=True)
+        config_data: dict[str, Any] = config.model_dump(
+            mode="json",
+            exclude_unset=True
+        )
 
-            # Case 1: full data updates
-            if all(key in config_data for key in ("name", "details")):
-                config_name:    str                         = config_data["name"]
-                config_details: dict[str, dict[str, Any]]   = config_data["details"]
+        # Empty payload validation
+        if not config_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "400 - Bad Request",
+                    "message": "Incoming data cannot be empty."
+                }
+            )
 
-                config_db.name      = config_name
-                config_db.details   = config_details # pyright: ignore
+        # Handle 'name' field update (if provided)
+        if "name" in config_data:
+            new_name: str | None = config_data["name"]
 
-                session.add(instance=config_db)
-                session.commit()
-                session.refresh(instance=config_db)
+            if new_name == config_db.name:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "status": "400 - Bad Request",
+                        "message": "Incoming data must be different from current stored data."
+                    }
+                )
 
+            config_db.name = new_name
 
-            # Case 2: partial data updates
+        # Handle 'details' field updates with a 3-layer validation strategy
+        if "details" in config_data:
+            config_incoming_data:   dict[str, dict[str, Any]] = config_data["details"]
+            config_current_data:    dict[str, dict[str, Any]] = config_db.details
+
+            # Determine if this's a full details payload update (Layer 1)
+            config_full_details_payload: bool = all(
+                inner_block in config_incoming_data
+                for inner_block in (
+                    "general",
+                    "query_analyser"
+                )
+            )
+
+            if config_full_details_payload:
+                # ========================================================== #
+                #       Layer 1: Full payload update for 'details'           #
+                # ========================================================== #
+                if config_incoming_data == config_current_data:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "status": "400 - Bad Request",
+                            "message": "Stored configuration details exactly match the incoming full payload."
+                        }
+                    )
+
+                # Check global uniqueness across other records
+                config_stored_data: UUID7 | None = session.exec(
+                    statement=select(
+                        Configurations.id
+                    ).where(
+                        Configurations.details == config_incoming_data,
+                        Configurations.id != config_id
+                    )
+                ).first()
+
+                if config_stored_data:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "status": "400 - Bad Request",
+                            "message": "Another configuration preset with these exact details already exists."
+                        }
+                    )
+
+                config_db.details = config_incoming_data
+
             else:
-                # Case 2a: partial data updates (config name)
-                if "name" in config_data:
-                    config_name: str = config_data["name"]
+                # ========================================================== #
+                #   Layer 2 & 3: Partial payload updates for inner blocks    #
+                # ========================================================== #
+                config_new_data: dict[ColumnElement, Any] = {}
+                config_inner_keys: set[str] = {
+                    "provider",
+                    "model",
+                    "is_quantised",
+                    "seed",
+                    "default_knowledge_path",
+                    "temp_knowledge_path",
+                    "api_key"
+                }
 
-                    if config_name == config_db.name:
-                        # Incoming data matched stored data so no need to
-                        # waste disk I/O for running update on nothing
-                        pass
-
-                    else:
-                        config_db.sqlmodel_update(obj=config_data)
-
-                        session.add(instance=config_db)
-                        session.commit()
-                        session.refresh(instance=config_db)
-
-                else:
-                    # Update other data than config name
-                    pass
-
-
-                # Case 2b: partial data updates (config details)
-                if "details" in config_data:
-                    config_details:         dict[str, dict[str, Any]]   = config_data["details"]
-
-                    general_config:         dict[str, Any]              = config_details["general"]
-                    query_analyser_config:  dict[str, Any]              = config_details["query_analyser"]
-
-                    new_config:             dict[ColumnElement, Any]    = {}
-
-
-                    # Sub-case 2b - Scenario 1:
-                    # General configs surgical updates
-                    if general_config == config_db.details["general"]: # pyright: ignore
-                        # Incoming data matched stored data so no need to
-                        # waste disk I/O for running update on nothing
-                        pass
-
-                    else:
-                        for (key, value) in general_config.items():
-                            if value != config_db.details["general"][key]: # pyright: ignore
-                                new_config[Configurations.details["general"][key]] = value # pyright: ignore
-
-
-                    # Sub-case 2b - Scenario 2:
-                    # Query Analyser configs surgical updates
-                    if query_analyser_config == config_db.details["query_analyser"]: # pyright: ignore
-                        # Incoming data matched stored data so no need to
-                        # waste disk I/O for running update on nothing
-                        pass
-
-                    else:
-                        for (key, value) in query_analyser_config.items():
-                            if value != config_db.details["query_analyser"][key]: # pyright: ignore
-                                new_config[Configurations.details["query_analyser"][key]] = value # pyright: ignore
-
-
-                    #TODO: some sort of `verbose` argument toggle for debug only
-                    #print(
-                    #    "{head_sep:s}{body_msg:s}{foot_sep:s}".format(
-                    #        head_sep=f"{'=' * 80}\n",
-                    #        body_msg="[DEBUG]   UPDATE DEFAULT CONFIG DATA\n",
-                    #        foot_sep=f"{'=' * 80}\n"
-                    #    )
-                    #)
-                    #pp(
-                    #    object=new_config,
-                    #    stream=stdout,
-                    #    indent=4 # Prefer tab over spaces indentation
-                    #)
-
-                    if len(new_config) == 0:
-                        # Two scenarios can occured here:
-                        # 1. Incoming data completely matched stored data
-                        # => Do nothing. We don't want to waste disk
-                        #    I/O for update with zero changes.
-                        #
-                        # 2. Something's rising and it isn't the shield hero...
-                        # => Kindly ask user to submit a bug report
-                        #    to us so we can investigate this as I
-                        #    cannot think of one op top of my head.
-                        pass
-
-                    else:
-                        # NOTE:
-                        # This might be hard to read because we're trying
-                        # to be dynamic by leverage the type check from
-                        # ORM for running SQL query. This code (in SQL
-                        # syntax) is:
-                        #   UPDATE
-                        #       configurations
-                        #   SET
-                        #       configurations['details'][config_type][current key] = <new value>
-                        #   WHERE
-                        #       configurations.id = config_id
-                        #   RETURNING
-                        #       configurations.user_id,
-                        #       configurations.name,
-                        #       configurations.details
-                        config_stmt: Update = (
-                            update(table=Configurations)
-                            .where(Configurations.id == config_id) # pyright: ignore
-                            .values(new_config)
-                            .returning(Configurations)
+                for inner_block in (
+                    "general",
+                    "query_analyser"
+                ):
+                    if inner_block in config_incoming_data:
+                        config_incoming_block:  dict[str, Any] = config_incoming_data[inner_block]
+                        config_stored_block:    dict[str, Any] = config_current_data.get(
+                            inner_block,
+                            {}
                         )
-                        session.exec(statement=config_stmt)
-                        session.commit()
 
-                else:
-                    # Update other data than config details
-                    pass
+                        # Filter out None values to strictly respect stored data
+                        # for unpassed keys
+                        config_filtered_incoming_block: dict[str, Any] = {
+                            key: value
+                            for (key, value) in config_incoming_block.items()
+                            if value is not None
+                        }
 
-            return {
-                "success": True,
-                "updated": config_db
-            }
+                        if not config_filtered_incoming_block:
+                            continue
+
+                        # Check if incoming block is an exact match to stored block -> 400
+                        if config_filtered_incoming_block == config_stored_block:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail={
+                                    "status": "400 - Bad Request",
+                                    "message": f"Stored [{inner_block}] settings exactly match the incoming data."
+                                }
+                            )
+
+                        # Check if it's a 2nd layer full inner block update (all
+                        # schema keys present and not None)
+                        if config_inner_keys.issubset(config_filtered_incoming_block.keys()):
+                            # ========================================================== #
+                            #   Layer 2: Full inner block replacement/concatenation      #
+                            # ========================================================== #
+                            config_current_data[inner_block] = config_filtered_incoming_block
+                            config_new_data[Configurations.details[inner_block]] = config_filtered_incoming_block
+
+                        else:
+                            # ================================================================= #
+                            # Layer 3: Fully partial payload (surgical key-by-key subscripting) #
+                            # ================================================================= #
+                            matching_filtered_keys: bool = True
+
+                            for (key, value) in config_filtered_incoming_block.items():
+                                if (
+                                        key
+                                    in  config_stored_block
+                                    and config_stored_block[key] == value
+                                ):
+                                    pass
+
+                                else:
+                                    matching_filtered_keys = False
+
+                                # Map dynamic SQL JSONB subscript update for modified fields only
+                                config_new_data[Configurations.details[inner_block][key]] = value
+
+                            if matching_filtered_keys:
+                                raise HTTPException(
+                                    status_code=status.HTTP_400_BAD_REQUEST,
+                                    detail={
+                                        "status": "400 - Bad Request",
+                                        "message": f"All provided fields in [{inner_block}] exactly match the stored data."
+                                    }
+                                 )
+
+
+                # Only perform UPDATE query if payload actually contains new data
+                if config_new_data:
+                    # NOTE:
+                    # This might be hard to read because we're trying to be
+                    # dynamic by leverage the type check from ORM for running SQL
+                    # query. The equivalent SQL syntax is:
+                    #   UPDATE
+                    #       configurations
+                    #   SET
+                    #       configurations['details'][config_type][current key] = <new value>
+                    #   WHERE
+                    #       configurations.id = config_id
+                    #   RETURNING
+                    #       configurations.user_id,
+                    #       configurations.name,
+                    #       configurations.details
+                    config_stmt: Update = (
+                        update(table=Configurations)
+                        .where(Configurations.id == config_id)
+                        .values(config_new_data)
+                        .returning(Configurations)
+                    )
+                    session.exec(statement=config_stmt)
+
+        session.add(instance=config_db)
+        session.commit()
+        session.refresh(instance=config_db)
+
+        return {
+            "success": True,
+            "updated": config_db
+        }
 
     except IntegrityError as psycopg_err:
         raise HTTPException(
