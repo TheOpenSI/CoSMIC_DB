@@ -10,6 +10,7 @@ from sqlmodel import select
 ### Type hints ###
 from pydantic.types import UUID7
 from typing import Any
+from collections.abc import Sequence
 from ...types.tags import APITag
 from sqlalchemy.exc import IntegrityError
 
