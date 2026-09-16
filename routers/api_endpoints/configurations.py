@@ -11,6 +11,7 @@ from sqlalchemy.sql.expression import update
 
 ### Type hints ###
 from typing import Any
+from collections.abc import Sequence
 from ...types.tags import APITag
 from pydantic.types import UUID7
 from sqlalchemy.exc import IntegrityError
