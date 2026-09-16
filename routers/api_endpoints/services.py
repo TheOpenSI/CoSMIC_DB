@@ -14,6 +14,7 @@ from typing import (
     Annotated,
     Any
 )
+from collections.abc import Sequence
 from ...types.tags import APITag
 from pydantic.types import PositiveInt
 from sqlalchemy.exc import IntegrityError
