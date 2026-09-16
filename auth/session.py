@@ -70,7 +70,7 @@ def read_session(request: Request) -> dict:
 
 def read_session_allowed_expired(request: Request) -> dict:
 
-    #This endpoint only for refresh token and only designed beacuse google idp dosent give id_token on hitting refresh token endpoint
+    #This endpoint only for refresh token and only designed beacuse google idp dosent give access_token or any deatils not stored in refresh token so we need to get details from expired acees token.
     token = request.cookies.get(config.SESSION_COOKIE_NAME)
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
