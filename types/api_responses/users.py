@@ -27,11 +27,6 @@ class UsersPublicResponse(BaseModel):
     result:     list[UserPublic]
 
 
-class UserCreateResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    success:    bool
-    created:    UserPublic
 
 
 class UserPublicResponse(BaseModel):
