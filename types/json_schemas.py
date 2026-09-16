@@ -84,3 +84,18 @@ class ChatHistorySchema(BaseModel):
     response_create_on: AwareDatetime
     input_token:        PositiveInt     # For final response received from `/cosmic (POST)` endpoint
     output_token:       PositiveInt     # For final response received from `/cosmic (POST)` endpoint
+
+
+class ChatHistorySchemaUpdate(BaseModel):
+    """docstring for ChatHistorySchemaUpdate."""
+    model_config = ConfigDict(extra="forbid")
+
+    inquiry_cycle_id:   UUID7 | None            = None
+    user_role:          str | None              = None  # NOTE: per agreed solution from our team
+    user_query:         str | None              = None
+    query_create_on:    AwareDatetime | None    = None
+    llm_role:           str | None              = None  # NOTE: per agreed solution from our team
+    llm_response:       str | None              = None
+    response_create_on: AwareDatetime | None    = None
+    input_token:        PositiveInt | None      = None  # For final response received from `/cosmic (POST)` endpoint
+    output_token:       PositiveInt | None      = None  # For final response received from `/cosmic (POST)` endpoint
