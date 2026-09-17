@@ -52,3 +52,13 @@ GOOGLE_JWKS_URL = cosmic_auth_configs.get(
     "GOOGLE_JWKS_URL", "https://www.googleapis.com/oauth2/v3/certs"
 )
 GOOGLE_ISSUER = cosmic_auth_configs.get("GOOGLE_ISSUER", "https://accounts.google.com")
+
+# ── Azure AD ─────────────────────────────────────────────────────────────────
+AZURE_AD_CLIENT_ID = cosmic_auth_configs.get("AZURE_AD_CLIENT_ID")
+AZURE_AD_TENANT_ID = cosmic_auth_configs.get("AZURE_AD_TENANT_ID")
+AZURE_AD_CLIENT_SECRET = cosmic_auth_configs.get("AZURE_AD_CLIENT_SECRET")
+AZURE_AD_ISSUER = f"https://login.microsoftonline.com/{AZURE_AD_TENANT_ID}/v2.0"
+
+AZURE_AD_AUTH_URL  = f"https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
+AZURE_AD_TOKEN_URL = f"https://login.microsoftonline.com/common/oauth2/v2.0/token"
+AZURE_AD_JWKS_URL  = f"https://login.microsoftonline.com/common/discovery/v2.0/keys"
