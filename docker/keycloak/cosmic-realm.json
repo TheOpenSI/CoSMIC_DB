@@ -12,7 +12,7 @@
   "verifyEmail" : true,
   "smtpServer": {
     "host": "smtp.gmail.com",
-    "port": 587,
+    "port": "587",
     "from": "${KEYCLOAK_SMTP_USER}",
     "fromDisplayName": "CoSMIC",
     "starttls": "true",
