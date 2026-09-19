@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Abstractclassmethod
+from typing import Protocol
 
 
 @dataclass
@@ -21,7 +21,7 @@ class NormalizedClaims:
     roles: list[str] = field(default_factory=list)
 
 
-class OAuthProvider(Abstractclassmethod):
+class OAuthProvider(Protocol):
     name: str
 
     def authorize_url(self, state: str, redirect_uri: str) -> str:
