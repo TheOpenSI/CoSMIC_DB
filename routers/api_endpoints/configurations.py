@@ -305,6 +305,26 @@ async def update_config_v1(
             )
 
             if config_full_preset_update:
+                # Empty full preset payload validation
+                if (
+                    not config_incoming_preset_data.get(
+                        "general",
+                        None
+                    )
+                    or
+                    not config_incoming_preset_data.get(
+                        "query_analyser",
+                        None
+                    )
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "status": "400 - Bad Request",
+                            "message": "Incoming full preset data cannot be empty."
+                        }
+                    )
+
                 # Full payload update for 'details' (Layer 1)
                 if config_incoming_preset_data == config_current_preset_data:
                     raise HTTPException(
@@ -341,6 +361,26 @@ async def update_config_v1(
                     session.refresh(instance=config_db)
 
             else:
+                # Empty partial preset payload validation
+                if (
+                    not config_incoming_preset_data.get(
+                        "general",
+                        None
+                    )
+                    or
+                    not config_incoming_preset_data.get(
+                        "query_analyser",
+                        None
+                    )
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "status": "400 - Bad Request",
+                            "message": "Incoming partial preset data cannot be empty."
+                        }
+                    )
+
                 # Partial payload updates for config settings (Layer 2 & 3)
                 config_setting_new_data: dict[ColumnElement, Any] = {}
                 CONFIG_SETTING_INNER_FIELDS: tuple[str, ...] = (
@@ -449,30 +489,30 @@ async def update_config_v1(
             "updated": config_db
         }
 
-    except IntegrityError as psycopg_err:
+    except IntegrityError as psycopg_exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "status": "409 - Conflict",
-                "message": f"{psycopg_err}"
+                "message": f"{psycopg_exc}"
             }
         )
 
-    except TypeError as python_err:
+    except TypeError as python_exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "status": "500 - Type Error",
-                "message": f"{python_err}"
+                "message": f"{python_exc}"
             }
         )
 
-    except ResponseValidationError as fastapi_err:
+    except ResponseValidationError as fastapi_exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "status": "500 - Response Validation Error",
-                "message": f"{fastapi_err}"
+                "message": f"{fastapi_exc}"
             }
         )
 
