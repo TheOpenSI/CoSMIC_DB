@@ -15,7 +15,6 @@ from ...apis.data_models.users import (
 )
 
 
-
 """
 Client responses format according to FE requirements.
 """
@@ -25,8 +24,6 @@ class UsersPublicResponse(BaseModel):
     success:    bool
     count:      int
     result:     list[UserPublic]
-
-
 
 
 class UserPublicResponse(BaseModel):

@@ -25,8 +25,6 @@ class UserPublic(UserBase):
     create_on:  AwareDatetime
 
 
-
-
 class UserUpdate(UserBase):
     model_config = ConfigDict(extra="forbid")   # pyright: ignore
 

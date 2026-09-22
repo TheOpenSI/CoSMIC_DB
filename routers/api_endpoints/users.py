@@ -15,27 +15,23 @@ from typing import (
     Sequence
 )
 from ...types.tags import APITag
-from sqlalchemy.exc import IntegrityError
 
 
 ### Internal modules ###
 from ...cores.db import SessionDependency
 from ...cores.globals import (
     OPENAPI_GET_EXTRA_RESPONSES,
-    OPENAPI_POST_EXTRA_RESPONSES,
     OPENAPI_PATCH_EXTRA_RESPONSES,
     OPENAPI_DELETE_EXTRA_RESPONSES
 )
 from ...apis.table_models.users import Users
 from ...apis.data_models.users import (
     # For validation (Data Model)
-    UserCreate,
     UserUpdate
 )
 from ...types.api_responses.users import (
     # For client responses (Responses Model)
     UsersPublicResponse,
-    UserCreateResponse,
     UserPublicResponse,
     UserUpdateResponse,
     UserDeleteResponse
@@ -71,8 +67,6 @@ async def read_users_v1(
             "count": total_users, # all fetchable user data
             "result": users_view
         }
-
-
 
 
 @users_v1_router.get(
