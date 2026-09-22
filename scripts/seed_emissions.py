@@ -1,19 +1,20 @@
 """
 scripts/seed_emissions.py
 
-Generates fake CodeCarbon-style emissions rows and inserts them DIRECTLY into
-PostgreSQL via psycopg, bypassing the FastAPI layer for inserts.
+Generates fake CodeCarbon-style emissions rows AND fake chatbox histories
+(with input_token / output_token) and inserts them DIRECTLY into PostgreSQL
+via psycopg, bypassing the FastAPI layer.
 
-This lets us backdate `timestamp` values (impossible through POST /emissions,
-since the Emissions table model auto-generates `timestamp = now()` server-side).
+There is no tokens table. Token usage lives in chatboxes.details JSONB.
+Backdated timestamps are required for the 3/6/12 month dashboard charts.
 
 User IDs are fetched from GET /users so they stay valid after a fresh rebuild.
 Run from inside of the docker container to ensure all libraries are available.
     docker exec -it cosmic-backend-fastapi /bin/bash
 
-Usage:
-    uv run --group dev scripts/seed_emissions.py --rows 50 --users 2
-    uv run --group dev scripts/seed_emissions.py --rows 300 --users 2 --days-back 60
+Usage (one command seeds both tables):
+    uv run --group dev scripts/seed_emissions.py --users 1
+    uv run --group dev scripts/seed_emissions.py --rows 50 --users 1 --days-back 180 --chatboxes 6 --messages 12
 """
 
 ### Core modules ###
@@ -27,6 +28,7 @@ from uuid import uuid4, uuid7
 
 ### Third-party modules ###
 from psycopg import connect
+from psycopg.types.json import Jsonb
 
 
 # ── API / DB CONNECTION ────────────────────────────────────────────────────
@@ -61,11 +63,43 @@ CPU_MODELS: list[str] = [
 
 TRACKING_MODES: list[str] = ["process", "machine"]
 
+CHATBOX_NAMES: list[str] = [
+    "Carbon footprint",
+    "Scope 3 questions",
+    "Model comparison",
+    "Energy report",
+    "Research session",
+    "Weekly review",
+]
+
+CHAT_TURNS: list[tuple[str, str]] = [
+    (
+        "What is my carbon footprint this month?",
+        "Your recent compute sessions produced a small amount of CO2. Check the dashboard trend for the exact kg value.",
+    ),
+    (
+        "How many tokens did the last query use?",
+        "Token counts are stored per inquiry in the chat history. Input tokens are usually larger than output tokens.",
+    ),
+    (
+        "Compare CPU and GPU power for my last run.",
+        "CPU and GPU power are recorded per emissions row. GPU may be zero if the run had no GPU.",
+    ),
+    (
+        "Show a 6 month emissions trend.",
+        "Use the dashboard 6M range. Months with no rows appear as gaps rather than zeros.",
+    ),
+    (
+        "What region is the grid intensity based on?",
+        "Seeded rows use Australian regions. Intensity is an approximation for local testing only.",
+    ),
+]
+
 # NSW grid carbon intensity (kg CO2/kWh)
 GRID_INTENSITY_NSW: float = 2.548692
 # ────────────────────────────────────────────────────────────────────────────
 
-INSERT_SQL: str = """
+INSERT_EMISSIONS_SQL: str = """
     INSERT INTO emissions (
         id, "timestamp", run_id, duration, emissions, emissions_rate,
         cpu_power, gpu_power, ram_power, cpu_energy, gpu_energy, ram_energy,
@@ -82,6 +116,14 @@ INSERT_SQL: str = """
         %(ram_total_size)s, %(tracking_mode)s, %(cpu_utilization_percent)s,
         %(gpu_utilization_percent)s, %(ram_utilization_percent)s, %(ram_used_gb)s,
         %(on_cloud)s, %(pue)s, %(wue)s, %(user_id)s
+    )
+"""
+
+INSERT_CHATBOXES_SQL: str = """
+    INSERT INTO chatboxes (
+        id, user_id, name, details, create_on
+    ) VALUES (
+        %(id)s, %(user_id)s, %(name)s, %(details)s, %(create_on)s
     )
 """
 
@@ -108,7 +150,7 @@ def fetch_user_ids() -> list[str]:
     if not user_ids:
         raise RuntimeError(
             "GET /api/v1/users/ returned no users. "
-            "Create at least one user before seeding emissions."
+            "Create at least one user before seeding dashboard data."
         )
 
     return user_ids
@@ -191,9 +233,52 @@ def build_fake_row(user_id: str, days_back: int) -> dict:
     }
 
 
-def seed(num_rows: int, num_users: int, days_back: int) -> None:
+def build_fake_history(query_at: datetime) -> dict:
+    """One chatboxes.details item. Rolling token charts bucket on query_create_on."""
+    user_query, llm_response = choice(CHAT_TURNS)
+    respond_at = query_at + timedelta(seconds=randint(2, 30))
+
+    return {
+        "inquiry_cycle_id": str(uuid7()),
+        "user_role": "user",
+        "user_query": user_query,
+        "query_create_on": query_at.isoformat(),
+        "llm_role": "assistant",
+        "llm_response": llm_response,
+        "response_create_on": respond_at.isoformat(),
+        "input_token": randint(120, 2500),
+        "output_token": randint(20, 400),
+    }
+
+
+def build_fake_chatbox(user_id: str, days_back: int, num_messages: int, index: int) -> dict:
+    timestamps = sorted(
+        random_backdated_timestamp(days_back) for _ in range(num_messages)
+    )
+    details = [build_fake_history(query_at) for query_at in timestamps]
+    create_on = timestamps[0] - timedelta(seconds=randint(1, 60))
+
+    return {
+        "id": str(uuid7()),
+        "user_id": user_id,
+        "name": f"{choice(CHATBOX_NAMES)} {index + 1}",
+        "details": Jsonb(details),
+        "create_on": create_on,
+    }
+
+
+def seed(
+    num_rows: int,
+    num_users: int,
+    days_back: int,
+    num_chatboxes: int,
+    num_messages: int,
+) -> None:
     user_ids = get_user_id_pool(num_users)
-    print(f"Seeding {num_rows} fake emission rows, juggled across {len(user_ids)} real user(s)...")
+    print(
+        f"Seeding {num_rows} emission row(s) and {num_chatboxes} chatbox(es) "
+        f"({num_messages} message(s) each) across {len(user_ids)} user(s)..."
+    )
     print("Using user IDs:")
     for uid in user_ids:
         print(f"  - {uid}")
@@ -204,30 +289,79 @@ def seed(num_rows: int, num_users: int, days_back: int) -> None:
         f"user={DB_USER} password={DB_PASSWORD}"
     )
 
-    rows = [
+    emission_rows = [
         build_fake_row(user_id=choice(user_ids), days_back=days_back)
         for _ in range(num_rows)
+    ]
+    chatbox_rows = [
+        build_fake_chatbox(
+            user_id=choice(user_ids),
+            days_back=days_back,
+            num_messages=num_messages,
+            index=i,
+        )
+        for i in range(num_chatboxes)
     ]
 
     try:
         with connect(conn_str) as conn:
             with conn.cursor() as cur:
-                cur.executemany(INSERT_SQL, rows)
+                if emission_rows:
+                    cur.executemany(INSERT_EMISSIONS_SQL, emission_rows)
+                if chatbox_rows:
+                    cur.executemany(INSERT_CHATBOXES_SQL, chatbox_rows)
             conn.commit()
-        print(f"Successfully inserted {num_rows} rows into 'emissions' table.")
+        print(f"Successfully inserted {num_rows} rows into 'emissions'.")
+        print(
+            f"Successfully inserted {num_chatboxes} rows into 'chatboxes' "
+            f"({num_chatboxes * num_messages} token history items)."
+        )
     except Exception as e:
         print(f"FAILED to seed data: {e}")
         raise
 
 
 def main() -> None:
-    parser = ArgumentParser(description="Seed fake emissions data directly into Postgres.")
+    parser = ArgumentParser(
+        description="Seed fake emissions and chatbox token data directly into Postgres."
+    )
     parser.add_argument("--rows", type=int, default=50, help="Number of fake emission rows to create.")
-    parser.add_argument("--users", type=int, default=2, help="Number of real existing user IDs to juggle rows across (capped at available real users).")
-    parser.add_argument("--days-back", type=int, default=30, help="Spread timestamps randomly across the last N days.")
+    parser.add_argument(
+        "--users",
+        type=int,
+        default=1,
+        help="Number of real existing user IDs to juggle rows across (capped at available real users).",
+    )
+    parser.add_argument(
+        "--days-back",
+        type=int,
+        default=180,
+        help="Spread timestamps randomly across the last N days (use 180+ for 6M charts).",
+    )
+    parser.add_argument(
+        "--chatboxes",
+        type=int,
+        default=6,
+        help="Number of fake chatbox sessions to create. Tokens are stored in details JSONB.",
+    )
+    parser.add_argument(
+        "--messages",
+        type=int,
+        default=10,
+        help="Number of inquiry cycles (token pairs) per chatbox.",
+    )
     args = parser.parse_args()
 
-    seed(num_rows=args.rows, num_users=args.users, days_back=args.days_back)
+    if args.messages < 1 and args.chatboxes > 0:
+        parser.error("--messages must be >= 1 when --chatboxes > 0")
+
+    seed(
+        num_rows=args.rows,
+        num_users=args.users,
+        days_back=args.days_back,
+        num_chatboxes=args.chatboxes,
+        num_messages=args.messages,
+    )
 
 
 if __name__ == "__main__":
