@@ -233,13 +233,12 @@ async def update_config_v1(
 
 
         # NOTE:
-        # These are some cases that can be considered a valid request for updating configuration data:
+        # These are some cases that can be considered a valid request for updating
+        # configuration data:
         # 1. Full updates
         # 2. Partial updates
-        #     2.1. Simple key-value pairs
-        #     2.2. Complex JSONB key-value pairs
-        #         2.2.1. Full inner block updates
-        #         2.2.2. Surgical inner block updates
+        #   2.1. Full partial updates
+        #   2.2. Surgical updates
 
 
         config_db: Configurations | None = session.get(
@@ -290,31 +289,45 @@ async def update_config_v1(
         # Handle 'details' field updates with a 3-layer validation strategy
         if (
             "details" in config_data
-            and config_data["details"] is not None
+            and config_data["details"] is None
+            or not config_data["details"]
         ):
-            config_incoming_preset_data: dict[str, dict[str, Any]] = config_data["details"]
-            config_current_preset_data:  dict[str, dict[str, Any]] = config_db.details
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "400 - Bad Request",
+                    "message": "Incoming configuration data cannot be empty."
+                }
+            )
 
-            # Determine if this's a full config preset update (Layer 1)
-            config_full_preset_update: bool = all(
-                config_setting_field in config_incoming_preset_data
+        else:
+            config_preset_incoming_data: dict[str, dict[str, Any] | None] = config_data["details"]
+            config_preset_current_data:  dict[str, dict[str, Any]] = config_db.details
+
+            # Determine if we'll perform a full or partial config update
+            config_preset_full_update: bool = all(
+                config_setting_field in config_preset_incoming_data
                 for config_setting_field in (
                     "general",
                     "query_analyser"
                 )
             )
 
-            if config_full_preset_update:
-                # Empty full preset payload validation
+            if config_preset_full_update:
+                ### Full 'details' field update (Layer 1) ###
+
+                # Empty validation on full field update
                 if (
-                    not config_incoming_preset_data.get(
-                        "general",
-                        None
+                    (
+                        config_preset_incoming_data["general"] is None
+                        or
+                        not config_preset_incoming_data["general"]
                     )
                     or
-                    not config_incoming_preset_data.get(
-                        "query_analyser",
-                        None
+                    (
+                        config_preset_incoming_data["query_analyser"] is None
+                        or
+                        not config_preset_incoming_data["query_analyser"]
                     )
                 ):
                     raise HTTPException(
@@ -325,65 +338,45 @@ async def update_config_v1(
                         }
                     )
 
-                # Full payload update for 'details' (Layer 1)
-                if config_incoming_preset_data == config_current_preset_data:
+                if config_preset_incoming_data == config_preset_current_data:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail={
                             "status": "400 - Bad Request",
-                            "message": "Stored configuration details exactly match the incoming full payload."
+                            "message": "Incoming full preset data matched current full preset data."
                         }
                     )
 
                 # Check global uniqueness across other records
-                config_current_preset_similarity: UUID7 | None = session.exec(
+                config_preset_current_uniqueness: UUID7 | None = session.exec(
                     statement=select(
                         Configurations.id
                     ).where(
-                        Configurations.details == config_incoming_preset_data,
+                        Configurations.details == config_preset_incoming_data,
                         Configurations.id != config_id
                     )
                 ).first()
 
-                if config_current_preset_similarity:
+                if config_preset_current_uniqueness:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail={
                             "status": "400 - Bad Request",
-                            "message": "Another configuration preset with these exact details already exists."
+                            "message": "Incoming full preset data matched another configuration's full preset data."
                         }
                     )
                 else:
-                    config_db.details = config_incoming_preset_data
+                    config_db.details = config_preset_incoming_data
 
                     session.add(instance=config_db)
                     session.commit()
                     session.refresh(instance=config_db)
 
             else:
-                # Empty partial preset payload validation
-                if (
-                    not config_incoming_preset_data.get(
-                        "general",
-                        None
-                    )
-                    or
-                    not config_incoming_preset_data.get(
-                        "query_analyser",
-                        None
-                    )
-                ):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail={
-                            "status": "400 - Bad Request",
-                            "message": "Incoming partial preset data cannot be empty."
-                        }
-                    )
+                ### Partial 'details' field update (Layer 2) ###
 
-                # Partial payload updates for config settings (Layer 2 & 3)
                 config_setting_new_data: dict[ColumnElement, Any] = {}
-                CONFIG_SETTING_INNER_FIELDS: tuple[str, ...] = (
+                CONFIG_SETTING_FIELDS: tuple[str, ...] = (
                     "provider",
                     "model",
                     "is_quantised",
@@ -393,81 +386,101 @@ async def update_config_v1(
                     "api_key"
                 )
 
+                # Empty validation on partial field update
+                if "general" in config_preset_incoming_data:
+                    if (
+                        config_preset_incoming_data["general"] is None
+                        or
+                        not config_preset_incoming_data["general"]
+                    ):
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={
+                                "status": "400 - Bad Request",
+                                "message": "Incoming partial [general] preset data cannot be empty."
+                            }
+                        )
+
+                if "query_analyser" in config_preset_incoming_data:
+                    if (
+                        config_preset_incoming_data["query_analyser"] is None
+                        or
+                        not config_preset_incoming_data["query_analyser"]
+                    ):
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={
+                                "status": "400 - Bad Request",
+                                "message": "Incoming partial [query_analyser] preset data cannot be empty."
+                            }
+                        )
+
                 for config_setting_field in (
                     "general",
                     "query_analyser"
                 ):
-                    if config_setting_field in config_incoming_preset_data:
-                        config_setting_incoming_data:   dict[str, Any] = config_incoming_preset_data[config_setting_field]
-                        config_setting_current_data:    dict[str, Any] = config_current_preset_data.get(
-                            config_setting_field,
-                            {}
-                        )
+                    if config_setting_field in config_preset_incoming_data:
+                        config_setting_incoming_data:   dict[str, Any] = config_preset_incoming_data[config_setting_field]
+                        config_setting_current_data:    dict[str, Any] = config_preset_current_data[config_setting_field]
 
-                        # Filter out None values to strictly respect stored data
-                        # for unpassed keys
-                        config_setting_filtered_incoming_data: dict[str, Any] = {
-                            config_setting_key: config_setting_value
-                            for (config_setting_key, config_setting_value) in config_setting_incoming_data.items()
-                            if config_setting_value is not None
-                        }
-
-                        if not config_setting_filtered_incoming_data:
-                            continue
-
-                        # Check if incoming filtered config setting data is an exact match to stored one
-                        if config_setting_filtered_incoming_data == config_setting_current_data:
+                        if config_setting_incoming_data == config_setting_current_data:
                             raise HTTPException(
                                 status_code=status.HTTP_400_BAD_REQUEST,
                                 detail={
                                     "status": "400 - Bad Request",
-                                    "message": f"Stored [{config_setting_field}] settings exactly match the incoming data."
+                                    "message": f"Incoming [{config_setting_field}] setting data matched current [{config_setting_field}] setting data ."
                                 }
                             )
 
-                        # Check if it's a 2nd layer full inner block update (all
-                        # schema keys present and not None)
-                        if set(CONFIG_SETTING_INNER_FIELDS).issubset(config_setting_filtered_incoming_data.keys()):
-                            # Full inner fields replacement/concatenation (Layer 2)
-                            config_current_preset_data[config_setting_field] = config_setting_filtered_incoming_data
-                            config_setting_new_data[Configurations.details[config_setting_field]] = config_setting_filtered_incoming_data
-
                         else:
-                            # Fully partial payload (surgical key-by-key subscripting) (Layer 3)
-                            config_filtered_matching_keys: bool = True
+                            ### Surgical subfield updates (Layer 3 & 4) ###
 
-                            for (config_filtered_setting_key, config_filtered_setting_value) in config_setting_filtered_incoming_data.items():
-                                if (
-                                    config_filtered_setting_key in config_setting_current_data
-                                    and config_setting_current_data[config_filtered_setting_key] == config_filtered_setting_value
-                                ):
-                                    pass
+                            if set(CONFIG_SETTING_FIELDS).issubset(config_setting_incoming_data.keys()):
+                                # Full subfields replacement/concatenation (Layer 3)
+                                config_preset_current_data[config_setting_field] = config_setting_incoming_data
+                                config_setting_new_data[Configurations.details[config_setting_field]] = config_setting_incoming_data
 
-                                else:
-                                    config_filtered_matching_keys = False
+                            else:
+                                # Surgical key-by-key subscripting (Layer 4)
+                                for (config_setting_key, config_setting_value) in config_setting_incoming_data.items():
+                                    if (
+                                        config_setting_key in config_setting_current_data
+                                        and config_setting_current_data[config_setting_key] == config_setting_value
+                                    ):
+                                        raise HTTPException(
+                                            status_code=status.HTTP_400_BAD_REQUEST,
+                                            detail={
+                                                "status": "400 - Bad Request",
+                                                "message": f"Incoming [{config_setting_field}->{config_setting_key}] setting value matched current [{config_setting_field}->{config_setting_key}] setting value."
+                                            }
+                                        )
 
-                                # Map dynamic SQL JSONB subscript update for modified fields only
-                                config_setting_new_data[Configurations.details[config_setting_field][config_filtered_setting_key]] = config_filtered_setting_value
+                                    config_setting_new_data[Configurations.details[config_setting_field][config_setting_key]] = config_setting_value
 
-                            if config_filtered_matching_keys:
-                                raise HTTPException(
-                                    status_code=status.HTTP_400_BAD_REQUEST,
-                                    detail={
-                                        "status": "400 - Bad Request",
-                                        "message": f"All provided fields in [{config_setting_field}] exactly match the stored data."
-                                    }
-                                 )
-
-                # Only perform UPDATE query if payload actually contains new data
+                # Only perform UPDATE query if 'details' field actually contains new data
                 if config_setting_new_data:
                     # NOTE:
                     # This might be hard to read because we're trying to be
                     # dynamic by leverage the type check from ORM for running SQL
-                    # query. The equivalent SQL syntax is:
+                    # query. The equivalent SQL syntax can be either case below:
+                    #
+                    # Layer 3:
                     #   UPDATE
                     #       configurations
                     #   SET
-                    #       configurations['details'][config_type][current key] = 
+                    #       configurations['details'][config_setting] = <new data>
+                    #   WHERE
+                    #       configurations.id = config_id
+                    #   RETURNING
+                    #       configurations.user_id,
+                    #       configurations.name,
+                    #       configurations.details
+                    #
+                    # Layer 4:
+                    #   UPDATE
+                    #       configurations
+                    #   SET
+                    #       configurations['details'][config_setting][config_subsetting] = <new data>
                     #   WHERE
                     #       configurations.id = config_id
                     #   RETURNING
