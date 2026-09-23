@@ -11,6 +11,7 @@ from auth import config
 from auth.providers import get_provider, list_enabled_providers
 from auth.providers.base import NormalizedClaims
 from auth import session as cosmic_session
+from app.apis.table_models.users import Users
 
 auth_router = APIRouter(prefix=config.AUTH_API_PREFIX, tags=["auth"])
 
@@ -141,15 +142,11 @@ async def logout(request: Request) -> RedirectResponse:
         pass
 
     response = RedirectResponse(url=f"{config.FRONTEND_URL}/login", status_code=302)
-    cosmic_session.clear_session_cookie(response)
-    response.delete_cookie(config.ACCESS_TOKEN_COOKIE, path="/")
-    response.delete_cookie(config.REFRESH_TOKEN_COOKIE, path="/")
-    response.delete_cookie(config.OAUTH_PROVIDER_COOKIE, path="/")
-    response.delete_cookie(config.OAUTH_STATE_COOKIE, path="/")
+    cosmic_session.clear_auth_cookies(response)
     return response
 
 @auth_router.post("/refresh")
-async def refresh(request: Request) -> JSONResponse:
+async def refresh(request: Request ,session: SessionDependency) -> JSONResponse:
     refresh_token = request.cookies.get(config.REFRESH_TOKEN_COOKIE)
     provider_name = request.cookies.get(config.OAUTH_PROVIDER_COOKIE)
     if not refresh_token or not provider_name:
@@ -157,6 +154,10 @@ async def refresh(request: Request) -> JSONResponse:
     idp = get_provider(provider_name)
 
     old = cosmic_session.read_session_allowed_expired(request)
+    user_id = UUID(str(old["user_id"]))
+    if session.get(Users, user_id) is None:
+        return cosmic_session.unauthorized_cleared()
+
 
     try : 
 
@@ -175,7 +176,7 @@ async def refresh(request: Request) -> JSONResponse:
             roles=old.get("roles") or [],
         )
 
-    user_id = UUID(str(old["user_id"]))
+    
 
     response = JSONResponse({"ok": True})
 
@@ -204,8 +205,11 @@ async def refresh(request: Request) -> JSONResponse:
 
 
 @auth_router.get("/me")
-async def me(request: Request) -> dict:
+async def me(request: Request, session: SessionDependency) -> dict:
     payload = cosmic_session.read_session(request)
+    user_id = payload.get("user_id")
+    if not user_id  or session.get(Users, UUID(str(user_id))) is None:
+        return cosmic_session.unauthorized_cleared()
     return {
         "user_id": payload.get("user_id"),
         "sub": payload.get("sub"),

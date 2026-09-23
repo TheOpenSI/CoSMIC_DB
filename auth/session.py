@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from uuid import UUID
 
 from auth import config
@@ -46,9 +47,6 @@ def set_session_cookie(response: Response, claims: NormalizedClaims,user_id: UUI
     )
 
 
-def clear_session_cookie(response: Response) -> None:
-    response.delete_cookie(config.SESSION_COOKIE_NAME, path="/")
-
 
 def read_session(request: Request) -> dict:
     """Decode + verify Cosmic session cookie. Raises 401 if missing/invalid."""
@@ -87,3 +85,16 @@ def read_session_allowed_expired(request: Request) -> dict:
         )
     except jwt.PyJWTError as exc:
         raise HTTPException(status_code=401, detail="Invalid session") from exc
+
+def clear_auth_cookies(response: Response) -> None:
+    response.delete_cookie(config.SESSION_COOKIE_NAME, path="/")
+    response.delete_cookie(config.ACCESS_TOKEN_COOKIE, path="/")
+    response.delete_cookie(config.REFRESH_TOKEN_COOKIE, path="/")
+    response.delete_cookie(config.OAUTH_PROVIDER_COOKIE, path="/")
+    response.delete_cookie(config.OAUTH_STATE_COOKIE, path="/")
+
+
+def unauthorized_cleared(detail: str = "User no longer exists") -> JSONResponse:
+    response = JSONResponse(status_code=401, content={"detail": detail})
+    clear_auth_cookies(response)
+    return response
