@@ -117,7 +117,7 @@ async def create_config_v1(
                     status_code=status.HTTP_409_CONFLICT,
                     detail={
                         "status": "409 - Conflict",
-                        "message": f"[{config_stored_name[1]}] config preset has been created."
+                        "message": f"A configuration with the name [{config_stored_name[1]}] already exists."
                         }
                     )
 
@@ -128,7 +128,7 @@ async def create_config_v1(
                     status_code=status.HTTP_409_CONFLICT,
                     detail={
                         "status": "409 - Conflict",
-                        "message": "This would cause confusion but an unknown config preset has been created. Recommended to update and give it a proper name."
+                        "message": "We do allow configuration name to be optional, though... we already have one for someone like you! Therefore, we recommended to give this new configuration a name."
                         }
                     )
 
@@ -276,7 +276,7 @@ async def update_config_v1(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail={
                         "status": "400 - Bad Request",
-                        "message": "Incoming data must be different from current stored data."
+                        "message": f"A configuration with the name [{config_incoming_name}] already exists."
                     }
                 )
             else:
