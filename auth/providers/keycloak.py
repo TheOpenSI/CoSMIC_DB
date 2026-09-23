@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from jwt import PyJWKClient
 
 from auth import config
-from auth.providers.base import NormalizedClaims, TokenBundle
+from auth.providers.base import NormalizedClaims, TokenBundle, OAuthProvider
 
 _jwks_client: PyJWKClient | None = None
 
@@ -21,7 +21,7 @@ def _get_jwks() -> PyJWKClient:
     return _jwks_client
 
 
-class KeycloakProvider:
+class KeycloakProvider(OAuthProvider):
     name = "keycloak"
 
     def authorize_url(self, state: str, redirect_uri: str) -> str:
