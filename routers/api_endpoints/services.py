@@ -102,9 +102,8 @@ async def create_service_v1(
     session: SessionDependency
 ) -> Any:
     # Validation against 'name' field in payload
-    service_stored_name: tuple[int, str] | None = session.exec(
+    service_name_uniqueness: str | None = session.exec(
         statement=select(
-            Services.id,
             Services.name
         )
         .where(
@@ -112,21 +111,23 @@ async def create_service_v1(
         )
     ).first()
 
-    if service_stored_name:
+    if service_name_uniqueness:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "status": "409 - Conflict",
-                "message": f"[{service_stored_name[1]}] service with same name already exists."
+                "message": f"A service with the name [{service_name_uniqueness}] already exists."
                 }
             )
-
 
     # Only perform INSERT query if payload actually contains new data
     service_db: Services = Services.model_validate(
         obj=service,
         strict=True
     )
+
+    # Prefer service name to get stored in lowercase per db convention
+    service_db.name = service_db.name.lower()
 
     session.add(instance=service_db)
     session.commit()
@@ -201,76 +202,47 @@ async def update_service_v1(
         )
 
     # Default core services name cannot be modified/renamed at application level
-    if service_db.name.lower() in CORE_SERVICES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "status": "400 - Bad Request",
-                "message": f"Default core service [{service_db.name}] cannot be modified."
-            }
-        )
+    if "name" in service_data:
+        service_name: str = service_data["name"].lower()
 
-    # Validate that incoming values are different from current stored values
-    # (both full/partial payloads)
-    for (key, value) in service_data.items():
-        stored_value: Any = getattr(
-            service_db,
-            key
-        )
-
-        # NOTE:
-        # 'name' field is a little special since we accept case-insensitive
-        # value for this one
-        if (
-                key == "name"
-            and isinstance(
-                    value,
-                    str
-                )
-            and isinstance(
-                    stored_value,
-                    str
-                )
-        ):
-            if stored_value.lower() == value.lower():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={
-                        "status": "400 - Bad Request",
-                        "message": "Incoming data must be different from current stored data."
-                    }
-                )
-        elif stored_value == value:
+        if service_name in CORE_SERVICES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "status": "400 - Bad Request",
-                    "message": "Incoming data must be different from current stored data."
+                    "message": f"Default core service [{service_name}] cannot be modified."
                 }
             )
 
-    # Uniqueness check for 'name' field value against other services
-    if "name" in service_data and service_data["name"] is not None:
-        service_stored_name: tuple[int, str] | None = session.exec(
+        if service_name == service_db.name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "400 - Bad Request",
+                    "message": f"Incoming service name [{service_name}] matched current service name [{service_db.name}]."
+                }
+            )
+
+        service_name_uniqueness: str | None = session.exec(
             statement=select(
-                Services.id,
                 Services.name
             )
             .where(
-                Services.name.ilike(service_data["name"]),
+                Services.name.ilike(service_name),
                 Services.id != service_id
             )
         ).first()
 
-        if service_stored_name:
+        if service_name_uniqueness:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
                     "status": "409 - Conflict",
-                    "message": f"[{service_stored_name[1]}] service with same name already exists."
+                    "message": f"A service with the name [{service_name_uniqueness}] already exists."
                 }
             )
 
+        service_db.name = service_name
 
     # Only perform UPDATE query if payload actually contains new data
     try:
