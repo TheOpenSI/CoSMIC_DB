@@ -66,14 +66,25 @@ async def callback_provider(
         cosmic_session.read_session(request)
         # Already logged in to avoid double callback 
         return HTMLResponse(
-            content="""<!doctype html>
-    <html><body style="font-family:sans-serif;padding:2rem">
-    <h1>Already signed in</h1>
-    <p>You can close this tab and continue in the other window.</p>
-    <script>window.close();</script>
-    </body></html>""",
-            status_code=200,
-        )
+            content="""\
+            <!doctype html>
+            <html lang="en">
+            <head>
+                <meta charset="utf-8" />
+                <title>Already signed in</title>
+            </head>
+            <body style="font-family: sans-serif; padding: 2rem;">
+                <h1>Already signed in</h1>
+                <p>You can close this tab and continue in the other window.</p>
+                <script>
+                setTimeout(function () {
+                    window.close();
+                }, 3000);
+                </script>
+            </body>
+            </html>""",
+                        status_code=200,
+                    )
     except HTTPException:
         pass
 
@@ -105,7 +116,7 @@ async def callback_provider(
         max_age=refresh_max_age,
         **_cookie_kwargs(),
     )
-    # ★ Cosmic session (source of truth for /me)
+    # Cosmic session (source of truth for /me)
     cosmic_session.set_session_cookie(response, claims, user.id)
     # Optional: keep refresh token for Keycloak revoke on logout
     if tokens.refresh_token:
