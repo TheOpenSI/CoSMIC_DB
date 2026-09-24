@@ -66,6 +66,46 @@ class ConfigurationSchema(BaseModel):
     query_analyser: QueryAnalyserConfigs
 
 
+class GeneralConfigsUpdate(BaseModel):
+    """docstring for GeneralConfigsUpdate."""
+    model_config = ConfigDict(extra="forbid")
+
+    provider:               str | None  = None
+    model:                  str | None  = None
+    is_quantised:           bool | None = None
+    seed:                   int | None  = None
+    # NOTE:
+    # These 2 fields need to be defined and stored from an external mounted
+    # volume data that's related to CoSMIC container.
+    default_knowledge_path: str | None  = None
+    temp_knowledge_path:    str | None  = None
+    # NOTE:
+    # This read the specified key's value provided in `cores/cosmic_config.env`
+    # file. I don't think this's the right solution to go for but it's the good
+    # enough solution for now.
+    api_key:                str | None  = None
+
+
+class QueryAnalyserConfigsUpdate(GeneralConfigsUpdate):
+    """docstring for QueryAnalyserConfigsUpdate."""
+    model_config = ConfigDict(extra="forbid")
+
+    # NOTE:
+    # On FE, 'Query Analyser' setting will be pre-filled by a default enabled
+    # button that apply the same configs from 'General' setting. Unless some
+    # special modifications needed (only 'Admin' can do this), this's the
+    # default behaviour.
+    pass
+
+
+class ConfigurationSchemaUpdate(BaseModel):
+    """docstring for ConfigurationSchema."""
+    model_config = ConfigDict(extra="forbid")
+
+    general:        GeneralConfigsUpdate | None         = None
+    query_analyser: QueryAnalyserConfigsUpdate | None   = None
+
+
 
 #==============================================================================#
 #       Pydantic validation for incoming requests that modify data in          #
