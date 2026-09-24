@@ -85,7 +85,7 @@ async def callback_provider(
             </body>
             </html>""",
                         status_code=200,
-                    )
+        )
     except HTTPException:
         pass
 
