@@ -50,13 +50,25 @@ from ...types.api_responses.chatboxes import (
     ChatboxUpdateResponse,
     ChatboxDeleteResponse
 )
-from ...utils.roles import valid_role_name
-from ...utils.chatboxes import validate_immutable_field
+from ...utils.roles import validate_role_name
 
 
 chatboxes_v1_router: APIRouter = APIRouter(
     prefix="/api/v1/chatboxes",
     tags=[APITag.chatbox]
+)
+
+
+CHAT_HISTORY_FIELDS: tuple[str, ...] = (
+    "inquiry_cycle_id",
+    "user_role",
+    "user_query",
+    "query_create_on",
+    "llm_role",
+    "llm_response",
+    "response_create_on",
+    "input_token",
+    "output_token"
 )
 
 
@@ -136,9 +148,7 @@ async def create_chatbox_v1(
 
         # Make sure `user_role` & `llm_role` fields value matched our constant
         # values
-        chat_history_role_name: bool = await valid_role_name(chat_history_data=chat_history_data)
-
-        if not chat_history_role_name:
+        if not validate_role_name(chat_history_data=chat_history_data):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
@@ -282,15 +292,6 @@ async def update_chatbox_v1(
                     }
                 )
 
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={
-                        "status": "400 - Bad Request",
-                        "message": "Incoming chatbox ownership (user ID) matched current chatbox ownership (user ID)."
-                    }
-                )
-
         # Handle 'name' field update (if provided)
         if "name" in chatbox_data:
             chatbox_db.name = chatbox_data["name"]
@@ -315,28 +316,117 @@ async def update_chatbox_v1(
 
         else:
             ### 'details' field update (Layer 1) ###
-
             chat_history_incoming_data: list[dict[str, Any]] = chatbox_data["details"]
             chat_history_current_data: list[dict[str, Any]] = chatbox_db.details
 
-            if len(chat_history_incoming_data) > len(chat_history_current_data):
-                ### Chat history updates (Layer 2) ###
-
-                if not validate_immutable_field(
-                    current_data=chat_history_current_data,
-                    incoming_data=chat_history_incoming_data
-                ):
-                    # Invalidate no matter if the value is the same or
-                    # not since these're immutable fields
+            if len(chat_history_incoming_data) == len(chat_history_current_data):
+                if not validate_role_name(chat_history_data=chat_history_incoming_data):
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail={
                             "status": "400 - Bad Request",
-                            "message": f"Invalid format on certain immutable fields found within provided fields."
+                            "message": f"Immutable field found within provided fields."
                         }
                     )
 
                 else:
+                    if all(
+                        chat_history_field in chat_history_block
+                        for chat_history_block in chat_history_incoming_data
+                        for chat_history_field in CHAT_HISTORY_FIELDS
+                    ):
+                        ### Chat history updates (Layer 2) ###
+
+                        # NOTE:
+                        # This might be hard to read because we're trying to be
+                        # dynamic by leverage the type check from ORM for running
+                        # SQL query. The equivalent SQL syntax is:
+                        #   UPDATE
+                        #       chatboxes
+                        #   SET
+                        #       details = details::JSONB || [new_chat_history]::JSONB
+                        #   WHERE
+                        #       chatboxes.id = config_id
+                        #   RETURNING
+                        #       chatboxes.name,
+                        #       chatboxes.details,
+                        #       chatboxes.id,
+                        #       chatboxes.create_on
+                        chatbox_stmt: Update = (
+                            update(table=Chatboxes)
+                            .where(Chatboxes.id == chatbox_session_id)
+                            .values({
+                                Chatboxes.details: (
+                                    func.cast(Chatboxes.details, JSONB)
+                                ).op("||")(
+                                    # We only need the extra record, but Python list
+                                    # always start from index 0
+                                    func.cast(chat_history_incoming_data, JSONB)
+                                )
+                            })
+                            .returning(Chatboxes)
+                        )
+                        session.exec(statement=chatbox_stmt)
+                        session.commit()
+                        session.refresh(instance=chatbox_db)
+
+                    else:
+                        chat_history_block_new_data:      dict[ColumnElement, Any] = {}
+                        chat_history_block_new_target:    BinaryExpression[Any] = Chatboxes.details
+
+                        for (chat_history_index, chat_history_block) in enumerate(chat_history_incoming_data):
+                            chat_history_current_block: dict[str, Any] = chat_history_current_data[chat_history_index]
+
+                            for chat_history_mutable_field in (
+                                "user_query",
+                                "llm_response"
+                            ):
+                                if (
+                                    chat_history_mutable_field in chat_history_block
+                                    and chat_history_block[chat_history_mutable_field] != chat_history_current_block[chat_history_mutable_field]
+                                ):
+                                    chat_history_block_new_data[chat_history_block_new_target[chat_history_index][chat_history_mutable_field]] = chat_history_block[chat_history_mutable_field]
+
+                        if chat_history_block_new_data:
+                            ### Surgical chat history updates (Layer 3) ###
+
+                            # NOTE:
+                            # This might be hard to read because we're trying to be
+                            # dynamic by leverage the type check from ORM for running
+                            # SQL query. The equivalent SQL syntax is:
+                            #   UPDATE
+                            #       chatboxes
+                            #   SET
+                            #       chatboxes['details'][chat_history_index][current key] = <new value>
+                            #   WHERE
+                            #       chatboxes.id = chatbox_session_id
+                            #   RETURNING
+                            #       chatboxes.user_id,
+                            #       chatboxes.name,
+                            #       chatboxes.details
+                            chatbox_stmt: Update = (
+                                update(table=Chatboxes)
+                                .where(Chatboxes.id == chatbox_session_id)
+                                .values(chat_history_block_new_data)
+                                .returning(Chatboxes)
+                            )
+                            session.exec(statement=chatbox_stmt)
+                            session.commit()
+                            session.refresh(instance=chatbox_db)
+
+            if len(chat_history_incoming_data) < len(chat_history_current_data):
+                if not validate_role_name(chat_history_data=chat_history_incoming_data):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "status": "400 - Bad Request",
+                            "message": f"Immutable field found within provided fields."
+                        }
+                    )
+
+                else:
+                    ### Chat history updates (Layer 2) ###
+
                     # NOTE:
                     # This might be hard to read because we're trying to be
                     # dynamic by leverage the type check from ORM for running
@@ -359,9 +449,7 @@ async def update_chatbox_v1(
                             Chatboxes.details: (
                                 func.cast(Chatboxes.details, JSONB)
                             ).op("||")(
-                                # We only need the extra record, but Python list
-                                # always start from index 0
-                                func.cast(chat_history_incoming_data[(len(chat_history_incoming_data) - 1):], JSONB)
+                                func.cast(chat_history_incoming_data, JSONB)
                             )
                         })
                         .returning(Chatboxes)
@@ -369,64 +457,6 @@ async def update_chatbox_v1(
                     session.exec(statement=chatbox_stmt)
                     session.commit()
                     session.refresh(instance=chatbox_db)
-
-            if len(chat_history_incoming_data) == len(chat_history_current_data):
-                ### Surgical chat history updates (Layer 3) ###
-
-                if not validate_immutable_field(
-                    current_data=chat_history_current_data,
-                    incoming_data=chat_history_incoming_data
-                ):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail={
-                            "status": "400 - Bad Request",
-                            "message": f"Immutable field found within provided fields."
-                        }
-                    )
-
-                else:
-                    chat_history_block_new_data:      dict[ColumnElement, Any] = {}
-                    chat_history_block_new_target:    BinaryExpression[Any] = Chatboxes.details
-
-                    for (chat_history_index, chat_history_block) in enumerate(chat_history_incoming_data):
-                        chat_history_current_block: dict[str, Any] = chat_history_current_data[chat_history_index]
-
-                        for chat_history_mutable_field in (
-                            "user_query",
-                            "llm_response"
-                        ):
-                            if (
-                                chat_history_mutable_field in chat_history_block
-                                and chat_history_block[chat_history_mutable_field] != chat_history_current_block[chat_history_mutable_field]
-                            ):
-                                chat_history_block_new_data[chat_history_block_new_target[chat_history_index][chat_history_mutable_field]] = chat_history_block[chat_history_mutable_field]
-                    
-                    if chat_history_block_new_data:
-                        # NOTE:
-                        # This might be hard to read because we're trying to be
-                        # dynamic by leverage the type check from ORM for running
-                        # SQL query. The equivalent SQL syntax is:
-                        #   UPDATE
-                        #       chatboxes
-                        #   SET
-                        #       chatboxes['details'][chat_history_index][current key] = <new value>
-                        #   WHERE
-                        #       chatboxes.id = chatbox_session_id
-                        #   RETURNING
-                        #       chatboxes.user_id,
-                        #       chatboxes.name,
-                        #       chatboxes.details
-                        chatbox_stmt: Update = (
-                            update(table=Chatboxes)
-                            .where(Chatboxes.id == chatbox_session_id)
-                            .values(chat_history_block_new_data)
-                            .returning(Chatboxes)
-                        )
-                        session.exec(statement=chatbox_stmt)
-                        session.commit()
-                        session.refresh(instance=chatbox_db)
-
 
         return {
             "success": True,
