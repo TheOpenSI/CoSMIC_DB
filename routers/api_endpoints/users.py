@@ -13,27 +13,23 @@ from pydantic.types import UUID7
 from typing import Any
 from collections.abc import Sequence
 from ...types.tags import APITag
-from sqlalchemy.exc import IntegrityError
 
 
 ### Internal modules ###
 from ...cores.db import SessionDependency
 from ...cores.globals import (
     OPENAPI_GET_EXTRA_RESPONSES,
-    OPENAPI_POST_EXTRA_RESPONSES,
     OPENAPI_PATCH_EXTRA_RESPONSES,
     OPENAPI_DELETE_EXTRA_RESPONSES
 )
 from ...apis.table_models.users import Users
 from ...apis.data_models.users import (
     # For validation (Data Model)
-    UserCreate,
     UserUpdate
 )
 from ...types.api_responses.users import (
     # For client responses (Responses Model)
     UsersPublicResponse,
-    UserCreateResponse,
     UserPublicResponse,
     UserUpdateResponse,
     UserDeleteResponse
@@ -69,113 +65,6 @@ async def read_users_v1(
             "count": total_users, # all fetchable user data
             "result": users_view
         }
-
-
-@users_v1_router.post(
-    path="/",
-    status_code=status.HTTP_201_CREATED,
-    response_model=UserCreateResponse,
-    responses={**OPENAPI_POST_EXTRA_RESPONSES}
-)
-async def create_user_v1(
-    user: UserCreate,
-    session: SessionDependency
-) -> Any:
-    try:
-        # Validation against 'name' field in payload
-        user_stored_name: tuple[UUID7, str] | None = session.exec(
-            statement=select(
-                Users.id,
-                Users.name
-            )
-            .where(
-                Users.name == user.name
-            )
-        ).first()
-
-        if user_stored_name:
-            # NOTE:
-            # We tried to utilise what 're' offered by default so it looks quite
-            # special than a normal RegEx. The original form (assume using `/` as
-            # default delims) is:
-            #                           "/example|test|demo/gmix"
-            if re.findall(
-                pattern=r"example|test|demo",
-                string=user_stored_name[1],
-                flags=(
-                    re.IGNORECASE   |
-                    re.MULTILINE    |
-                    re.VERBOSE
-                )
-            ):
-                # Different response message for these special users since it can
-                # only be created by us admins for testing purposes
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "status": "409 - Conflict",
-                        "message": "A test/demo user has been created. Feels free to use it directly."
-                        }
-                    )
-
-
-        # Validation against 'email' field in payload
-        user_stored_email: tuple[UUID7, str | None] | None = session.exec(
-            statement=select(
-                Users.id,
-                Users.email
-            )
-            .where(
-                Users.email == user.email
-            )
-        ).first()
-
-        if user_stored_email:
-            if user_stored_email[1] is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "status": "409 - Conflict",
-                        "message": f"An user with [{user_stored_email[1]}] email has been registered."
-                        }
-                    )
-
-            else:
-                # Different response message for NULL data rather than showing
-                # literal 'None' value
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "status": "409 - Conflict",
-                        "message": "A test/demo account has been created. Feels free to use it directly."
-                        }
-                    )
-
-
-        # Only perform INSERT query if payload actually contains new data
-        user_db: Users = Users.model_validate(
-            obj=user,
-            strict=True
-        )
-
-        session.add(instance=user_db)
-        session.commit()
-        session.refresh(instance=user_db)
-
-        return {
-            "success": True,
-            "created": user_db
-        }
-
-
-    except IntegrityError as sqlalchemy_exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "status": "409 - Conflict",
-                "message": f"{sqlalchemy_exc}"
-            }
-        )
 
 
 @users_v1_router.get(
