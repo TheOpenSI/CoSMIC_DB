@@ -1,29 +1,35 @@
 ### Core modules ###
+from re import (
+    IGNORECASE,
+    MULTILINE,
+    VERBOSE,
+    sub
+)
 from fastapi import (
     APIRouter,
     HTTPException,
     Query,
     status
 )
-from sqlmodel import (
-    func,
-    select
-)
+from sqlmodel import select
 
 
 ### Type hints ###
 from sqlmodel.sql.expression import SelectOfScalar
 from typing import (
     Annotated,
-    Any,
-    Sequence
+    Any
 )
+from collections.abc import Sequence
 from ...types.tags import APITag
 from pydantic.types import PositiveInt
+from sqlalchemy.exc import IntegrityError
+
 
 ### Internal modules ###
 from ...cores.db import SessionDependency
 from ...cores.globals import (
+    CORE_SERVICES,
     OPENAPI_GET_EXTRA_RESPONSES,
     OPENAPI_POST_EXTRA_RESPONSES,
     OPENAPI_PATCH_EXTRA_RESPONSES,
@@ -46,6 +52,7 @@ from ...types.api_responses.services import (
 from ...types.filter_params import (
     ServiceFilterParams
 )
+
 
 
 services_v1_router: APIRouter = APIRouter(
@@ -101,36 +108,32 @@ async def create_service_v1(
     session: SessionDependency
 ) -> Any:
     # Validation against 'name' field in payload
-    service_stored_name: tuple[int, str] | None = session.exec(
+    service_name_uniqueness: str | None = session.exec(
         statement=select(
-            Services.id, # pyright: ignore
             Services.name
         )
         .where(
-            func.lower(
-                Services.name
-            ).like(
-                other=func.lower(service.name),
-                escape=None
-            )
+            Services.name.ilike(service.name)
         )
     ).first()
 
-    if service_stored_name:
+    if service_name_uniqueness:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "status": "409 - Conflict",
-                "message": f"'{service.name}' service with same name already exists."
+                "message": f"A service with the name [{service_name_uniqueness}] already exists."
                 }
             )
-
 
     # Only perform INSERT query if payload actually contains new data
     service_db: Services = Services.model_validate(
         obj=service,
         strict=True
     )
+
+    # Prefer service name to get stored in lowercase per db convention
+    service_db.name = service_db.name.lower()
 
     session.add(instance=service_db)
     session.commit()
@@ -178,7 +181,10 @@ async def update_service_v1(
     service: ServiceUpdate,
     session: SessionDependency
 ) -> Any:
-    service_db: Services | None = session.get(entity=Services, ident=service_id)
+    service_db: Services | None = session.get(
+        entity=Services,
+        ident=service_id
+    )
 
     if service_db is None:
         raise HTTPException(
@@ -186,23 +192,94 @@ async def update_service_v1(
             detail="Service Not Found!"
         )
 
-    else:
-        service_data: dict[str, Any] = service.model_dump(
-            mode="python",
-            exclude_unset=True
+    service_data: dict[str, Any] = service.model_dump(
+        mode="json",
+        exclude_unset=True
+    )
+
+    # Empty payload validation
+    if not service_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "400 - Bad Request",
+                "message": "Incoming data cannot be empty."
+            }
         )
 
-        # NOTE:
-        # This's a wrapped method provided by SQLModel module so we can simply
-        # "update" stored service data with new one without having to think of
-        # the logic behind it. I couldn't find an actual reference to this
-        # method from the module itself (not surprised much since its part of
-        # FastAPI) so that I can understand the usecase of it better. However,
-        # these 2 sources below are my best attempt to justify the usage here:
-        # 1. https://sqlmodel.tiangolo.com/tutorial/fastapi/update/#update-the-hero-in-the-database
-        # 2. https://deepwiki.com/fastapi/sqlmodel/3-database-operations#partial-updates-with-multiple-models
+    # Default core services name cannot be modified/renamed at application level
+    if "name" in service_data:
+        service_name: str = service_data["name"].lower()
 
-        # Only perform UPDATE queries if incoming data differ from stored data
+        if service_name in CORE_SERVICES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "400 - Bad Request",
+                    "message": f"Default core service [{service_name}] cannot be modified."
+                }
+            )
+
+        if service_name == service_db.name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "400 - Bad Request",
+                    "message": f"Incoming service name [{service_name}] matched current service name [{service_db.name}]."
+                }
+            )
+
+        # Normalise input by lowering case and stripping non-alphanumeric characters
+        service_normalised_name: str = sub(
+            pattern=r'[^a-z0-9]',
+            repl='',
+            string=service_name.lower(),
+            count=0,
+            flags=
+                MULTILINE   |
+                IGNORECASE  |
+                VERBOSE
+        )
+
+        # Check for bypass or attempts to do API injection attacks
+        if any(
+            core_service in service_normalised_name
+            for core_service in CORE_SERVICES
+        ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    # NOTE:
+                    # just being a little humour here instead of the lame 400
+                    # error message since this's definitely an attack
+                    detail={
+                        "status": "400 - Bad Request",
+                        "message": f"This is way too classic. Can you try something harder?"
+                    }
+                )
+
+        service_name_uniqueness: str | None = session.exec(
+            statement=select(
+                Services.name
+            )
+            .where(
+                Services.name.ilike(service_name),
+                Services.id != service_id
+            )
+        ).first()
+
+        if service_name_uniqueness:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "status": "409 - Conflict",
+                    "message": f"A service with the name [{service_name_uniqueness}] already exists."
+                }
+            )
+
+        service_db.name = service_name
+
+    # Only perform UPDATE query if payload actually contains new data
+    try:
         service_db.sqlmodel_update(obj=service_data)
 
         session.add(instance=service_db)
@@ -213,6 +290,16 @@ async def update_service_v1(
             "success": True,
             "updated": service_db
         }
+
+    except IntegrityError as sqlalchemy_exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "status": "409 - Conflict",
+                "message": f"{sqlalchemy_exc}"
+            }
+        )
 
 
 @services_v1_router.delete(

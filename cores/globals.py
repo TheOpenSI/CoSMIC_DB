@@ -13,9 +13,19 @@ from typing import Any
 
 
 
-USER_ROLE:      str             = 'user'
-LLM_ROLE:       str             = 'assistant'
-SYSTEM_ROLES:   tuple[str, ...] = ("admin", "user")
+USER_ROLE: str = 'user'
+LLM_ROLE: str = 'assistant'
+SYSTEM_ROLES: tuple[str, ...] = (
+    "admin", 
+    "user"
+)
+CORE_SERVICES: tuple[str, ...] = (
+    "chess",
+    "memory",
+    "code_generation",
+    "general_question_answering",
+    "academic_governance"
+)
 
 
 OPENAPI_GET_EXTRA_RESPONSES: dict[int | str, dict[str, Any]] = {
