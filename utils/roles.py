@@ -13,7 +13,7 @@ from ..cores.globals import (
 
 
 
-async def valid_role_name(
+def validate_role_name(
     chat_history_data:  list[dict[str, Any]],
     verbose:            bool = False
 ) -> bool:

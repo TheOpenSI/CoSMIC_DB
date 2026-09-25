@@ -1,4 +1,8 @@
 ### Core modules ###
+from datetime import (
+    datetime,
+    timezone
+)
 
 
 ### Type hints ###
@@ -6,19 +10,22 @@ from typing import Any
 
 
 ### Internal modules ###
-from datetime import datetime, timezone
 
 
 
-USER_ROLE:  str = 'user'
-LLM_ROLE:   str = 'assistant'
-CORE_SERVICES: tuple[str, ...] = (
+USER_ROLE: str = 'user'
+LLM_ROLE: str = 'assistant'
+SYSTEM_ROLES: tuple[str, ...] = (
+    "admin",
+    "user"
+)
+CORE_SERVICES: set[str] = {
     "chess",
     "memory",
     "code_generation",
     "general_question_answering",
     "academic_governance"
-)
+}
 
 
 OPENAPI_GET_EXTRA_RESPONSES: dict[int | str, dict[str, Any]] = {

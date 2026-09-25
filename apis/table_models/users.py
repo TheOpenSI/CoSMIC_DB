@@ -49,7 +49,6 @@ class Users(UserBase, table=True):
     __table_args__: tuple[
         PrimaryKeyConstraint,
         ForeignKeyConstraint,
-        UniqueConstraint,
         UniqueConstraint
     ] = (
         PrimaryKeyConstraint(
@@ -63,10 +62,6 @@ class Users(UserBase, table=True):
             onupdate="CASCADE",
             ondelete="CASCADE",
             match="FULL"
-        ),
-        UniqueConstraint(
-            "name",
-            name="UK_USER_NAME"
         ),
         UniqueConstraint(
             "email",

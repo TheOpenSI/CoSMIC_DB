@@ -9,11 +9,10 @@ from sqlmodel import select
 
 ### Type hints ###
 from pydantic.types import UUID7
-from typing import (
-    Any,
-    Sequence
-)
+from typing import Any
+from collections.abc import Sequence
 from ...types.tags import APITag
+from sqlalchemy.exc import IntegrityError
 
 
 ### Internal modules ###
@@ -22,7 +21,8 @@ from ...cores.globals import (
     OPENAPI_GET_EXTRA_RESPONSES,
     OPENAPI_POST_EXTRA_RESPONSES,
     OPENAPI_PATCH_EXTRA_RESPONSES,
-    OPENAPI_DELETE_EXTRA_RESPONSES
+    OPENAPI_DELETE_EXTRA_RESPONSES,
+    SYSTEM_ROLES
 )
 from ...apis.table_models.roles import Roles
 from ...apis.data_models.roles import (
@@ -88,7 +88,7 @@ async def create_role_v1(
             Roles.name
         )
         .where(
-            Roles.name == role.name
+            Roles.name.ilike(role.name)
         )
     ).first()
 
@@ -97,7 +97,7 @@ async def create_role_v1(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "status": "409 - Conflict",
-                "message": f"'{role_stored_name[1]}' already exists."
+                "message": f"[{role_stored_name[1]}] already exists."
                 }
             )
 
@@ -108,14 +108,25 @@ async def create_role_v1(
         strict=True
     )
 
-    session.add(instance=role_db)
-    session.commit()
-    session.refresh(instance=role_db)
+    try:
+        session.add(instance=role_db)
+        session.commit()
+        session.refresh(instance=role_db)
 
-    return {
-        "success": True,
-        "created": role_db
-    }
+        return {
+            "success": True,
+            "created": role_db
+        }
+
+    except IntegrityError as sqlalchemy_exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "status": "409 - Conflict",
+                "message": f"{sqlalchemy_exc}"
+            }
+        )
 
 
 @roles_v1_router.get(
@@ -153,15 +164,106 @@ async def update_role_v1(
     role: RoleUpdate,
     session: SessionDependency
 ) -> Any:
-    role_db: Roles | None = session.get(entity=Roles, ident=role_id)
+    role_db: Roles | None = session.get(
+        entity=Roles,
+        ident=role_id
+    )
 
     if role_db is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Role Not Found!"
         )
-    else:
-        role_data: dict[str, Any] = role.model_dump(exclude_unset=True)
+
+    # NOTE:
+    # Default system roles cannot be modified/renamed at application level
+    if role_db.name.lower() in SYSTEM_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "400 - Bad Request",
+                "message": f"Default system role [{role_db.name}] cannot be modified."
+            }
+        )
+
+    role_data: dict[str, Any] = role.model_dump(
+            mode='json',
+            exclude_unset=True
+    )
+
+    # Empty payload validation
+    if not role_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "400 - Bad Request",
+                "message": "Incoming data cannot be empty."
+            }
+        )
+
+    # Validate that incoming values are different from current stored values
+    # (both full/partial payloads)
+    for (key, value) in role_data.items():
+        stored_value: Any = getattr(
+            role_db,
+            key
+        )
+
+        # NOTE:
+        # 'name' field is a little special since we accept case-insensitive
+        # value for this one
+        if (
+                key == "name"
+            and isinstance(
+                    value,
+                    str
+                )
+            and isinstance(
+                    stored_value,
+                    str
+                )
+        ):
+            if stored_value.lower() == value.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "status": "400 - Bad Request",
+                        "message": "Incoming data must be different from current stored data."
+                    }
+                )
+
+        elif stored_value == value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "400 - Bad Request",
+                    "message": "Incoming data must be different from current stored data."
+                }
+            )
+
+    # Uniqueness check for 'name' field value against other roles
+    if "name" in role_data and role_data["name"] is not None:
+        role_stored_name: tuple[UUID7, str] | None = session.exec(
+            statement=select(
+                Roles.id,
+                Roles.name
+            )
+            .where(
+                Roles.name.ilike(role_data["name"]),
+                Roles.id != role_id
+            )
+        ).first()
+
+        if role_stored_name:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "status": "409 - Conflict",
+                    "message": f"[{role_stored_name[1]}] already exists."
+                }
+            )
+
+    try:
         role_db.sqlmodel_update(obj=role_data)
 
         session.add(instance=role_db)
@@ -172,6 +274,16 @@ async def update_role_v1(
             "success": True,
             "updated": role_db
         }
+
+    except IntegrityError as sqlalchemy_exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "status": "409 - Conflict",
+                "message": f"{sqlalchemy_exc}"
+            }
+        )
 
 
 @roles_v1_router.delete(

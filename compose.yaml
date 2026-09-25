@@ -113,6 +113,10 @@ services:
         target: keycloak_test_user_email.txt
       - source: cosmic-keycloak-test-user-pwd
         target: keycloak_test_user_pwd.txt
+      - source: cosmic-keycloak-smtp-user
+        target: keycloak_smtp_user.txt
+      - source: cosmic-keycloak-smtp-pwd
+        target: keycloak_smtp_pwd.txt
     environment:
       JAVA_OPTS_APPEND: "-Dkeycloak.migration.replace-placeholders=true"
       KC_HOSTNAME: localhost
@@ -123,6 +127,8 @@ services:
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
+        export KEYCLOAK_SMTP_USER="$(tr -d '\r\n' < /run/secrets/keycloak_smtp_user.txt)"
+        export KEYCLOAK_SMTP_PWD="$(tr -d '\r\n' < /run/secrets/keycloak_smtp_pwd.txt)"
         export KC_BOOTSTRAP_ADMIN_USERNAME="$$(tr -d '\r\n' < /run/secrets/keycloak_admin_usr.txt)"
         export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(tr -d '\r\n' < /run/secrets/keycloak_admin_pwd.txt)"
         export KEYCLOAK_CLIENT_SECRET="$$(tr -d '\r\n' < /run/secrets/keycloak_client_secret.txt)"
@@ -233,6 +239,12 @@ secrets:
 
   cosmic-keycloak-test-user-pwd:
     file: ./docker/secrets/keycloak_test_user_pwd.txt
+
+  cosmic-keycloak-smtp-user:
+    file: ./docker/secrets/keycloak_smtp_user.txt
+    
+  cosmic-keycloak-smtp-pwd:
+    file: ./docker/secrets/keycloak_smtp_pwd.txt
 
 
 configs:

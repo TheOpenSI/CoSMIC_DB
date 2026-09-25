@@ -7,7 +7,7 @@ from pydantic.types import (
     UUID7,
     AwareDatetime
 )
-from ...types.json_schemas import ChatHistorySchema
+from ...types.json_schemas import ChatHistorySchemaUpdate
 
 
 ### Internal modules ###
@@ -25,17 +25,17 @@ class ChatboxPublic(ChatboxBase):
 
 
 class ChatboxCreate(ChatboxBase):
-    model_config = ConfigDict(extra="forbid")           # pyright: ignore
+    model_config = ConfigDict(extra="forbid")
 
     pass
 
 
 class ChatboxUpdate(ChatboxBase):
-    model_config = ConfigDict(extra="forbid")           # pyright: ignore
+    model_config = ConfigDict(extra="forbid")
 
-    user_id:    UUID7 | None                    = None  # pyright: ignore
-    name:       str | None                      = None  # pyright: ignore
-    details:    list[ChatHistorySchema] | None  = None  # pyright: ignore
+    user_id:    UUID7 | None                            = None
+    name:       str | None                              = None
+    details:    list[ChatHistorySchemaUpdate] | None    = None
 
 
 class ChatboxDelete(ChatboxBase):

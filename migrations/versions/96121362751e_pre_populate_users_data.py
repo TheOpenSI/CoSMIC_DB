@@ -31,7 +31,6 @@ def upgrade() -> None:
         sa.Column('create_on', sa.TIMESTAMP(timezone=True), autoincrement=False, nullable=False),
         sa.PrimaryKeyConstraint('id', name=op.f(name='PK_USER_ID')),
         sa.ForeignKeyConstraint(['role_id'], ['roles.id'], name=op.f('FK_USER_ROLE_ID'), onupdate='CASCADE', ondelete='CASCADE', match='FULL'),
-        sa.UniqueConstraint('name', name=op.f(name='UK_USER_NAME'), postgresql_include=[], postgresql_nulls_not_distinct=False),
         sa.UniqueConstraint('email', name=op.f(name='UK_USER_EMAIL'), postgresql_include=[], postgresql_nulls_not_distinct=False),
         if_not_exists=True
     )

@@ -1,5 +1,4 @@
 ### Core modules ###
-from datetime import datetime
 from uuid import (
     UUID,
     SafeUUID
@@ -16,10 +15,8 @@ from sqlmodel import select
 
 
 ### Type hints ###
-from typing import (
-    Any,
-    Sequence
-)
+from typing import Any
+from collections.abc import Sequence
 from ...types.tags import APITag
 from pydantic.types import UUID7
 from sqlalchemy.exc import IntegrityError
@@ -53,13 +50,25 @@ from ...types.api_responses.chatboxes import (
     ChatboxUpdateResponse,
     ChatboxDeleteResponse
 )
-from ...utils.roles import valid_role_name
-
+from ...utils.roles import validate_role_name
 
 
 chatboxes_v1_router: APIRouter = APIRouter(
     prefix="/api/v1/chatboxes",
     tags=[APITag.chatbox]
+)
+
+
+CHAT_HISTORY_FIELDS: tuple[str, ...] = (
+    "inquiry_cycle_id",
+    "user_role",
+    "user_query",
+    "query_create_on",
+    "llm_role",
+    "llm_response",
+    "response_create_on",
+    "input_token",
+    "output_token"
 )
 
 
@@ -137,19 +146,18 @@ async def create_chatbox_v1(
         ]
 
 
-        # Make sure `user_role` & `llm_role` field value matched our constant
+        # Make sure `user_role` & `llm_role` fields value matched our constant
         # values
-        validate_role_name: bool = await valid_role_name(chat_history_data=chat_history_data)
-
-        if not validate_role_name:
+        if not validate_role_name(chat_history_data=chat_history_data):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "status": "400 - Bad Request",
-                    "message": "Invalid chat history data for creates!"
+                    "message": "Invalid chat history data for creates."
                 }
             )
 
+        # Only perform INSERT query if payload actually contains new data
         else:
             # NOTE:
             # Very much similar reason as above
@@ -219,7 +227,22 @@ async def read_chatbox_v1(
     path="/{chatbox_session_id}",
     status_code=status.HTTP_200_OK,
     response_model=ChatboxUpdateResponse,
-    responses={**OPENAPI_PATCH_EXTRA_RESPONSES}
+    responses={
+        **OPENAPI_PATCH_EXTRA_RESPONSES,
+        418: {
+            "description": "API Injection Attacks",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": {
+                            "status": "418 - I'm a teapot",
+                            "message": "string"
+                        }
+                    }
+                }
+            }
+        }
+    }
 )
 async def update_chatbox_v1(
     chatbox_session_id: UUID7,
@@ -227,7 +250,20 @@ async def update_chatbox_v1(
     session: SessionDependency
 ) -> Any:
     try:
-        chatbox_db: Chatboxes | None = session.get(entity=Chatboxes, ident=chatbox_session_id)
+
+
+        # NOTE:
+        # These are some cases that can be considered a valid request for updating
+        # chatbox data:
+        # 1. Full updates
+        # 2. Partial updates
+        #   2.1. Chat history updates
+        #   2.2. Surgical chat history block updates
+
+        chatbox_db: Chatboxes | None = session.get(
+            entity=Chatboxes,
+            ident=chatbox_session_id
+        )
 
         if chatbox_db is None:
             raise HTTPException(
@@ -235,673 +271,275 @@ async def update_chatbox_v1(
                 detail="Chatbox Not Found!"
             )
 
+        chatbox_data: dict[str, Any] = chatbox.model_dump(
+            mode="json",
+            exclude_unset=True
+        )
+
+        # Empty payload validation
+        if not chatbox_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "400 - Bad Request",
+                    "message": "Incoming data cannot be empty."
+                }
+            )
+
+        # We must never allow transfering chat sessions between user ID
+        if "user_id" in chatbox_data:
+            # NOTE:
+            # It's much more safe and accurate to compare UUID value in its
+            # original form (UUID Object). The compiler will now understand
+            # that we're matching them in chronological logic instead.
+            chatbox_payload_user_id: UUID = UUID(
+                hex=chatbox_data["user_id"],
+                version=7,
+                is_safe=SafeUUID.safe
+            )
+
+            if chatbox_payload_user_id != chatbox_db.user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "status": "400 - Bad Request",
+                        "message": "Chatbox ownership (user ID) cannot be modified."
+                    }
+                )
+
+        # Handle 'name' field update (if provided)
+        if "name" in chatbox_data:
+            chatbox_db.name = chatbox_data["name"]
+
+            session.add(instance=chatbox_db)
+            session.commit()
+            session.refresh(instance=chatbox_db)
+
+        # Handle 'details' field updates with a 3-layer validation strategy
+        if (
+            "details" in chatbox_data
+            and chatbox_data["details"] is None
+            or not chatbox_data["details"]
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "400 - Bad Request",
+                    "message": "Incoming chat history data cannot be empty."
+                }
+            )
+
         else:
-            chatbox_data: dict[str, Any] = chatbox.model_dump(mode="json", exclude_unset=True)
+            ### 'details' field update (Layer 1) ###
+            chat_history_incoming_data: list[dict[str, Any]] = chatbox_data["details"]
+            chat_history_current_data: list[dict[str, Any]] = chatbox_db.details
 
-            # Case 1: full data updates
-            if all(key in chatbox_data for key in ("user_id", "name", "details")):
-                chatbox_user_id:    str                     = chatbox_data["user_id"]
-                chatbox_name:       str                     = chatbox_data["name"]
-                chatbox_details:    list[dict[str, Any]]    = chatbox_data["details"]
-
-                # NOTE:
-                # It's much more safe and accurate to compare UUID value in its
-                # original form (UUID Object). The compiler will now understand
-                # that we're matching them in chronological logic instead.
-
-                # Case 1a:
-                # Surgical specifed chatbox ownership (user ID) updates within
-                # full data updates
-                if UUID(
-                    hex=chatbox_user_id,
-                    version=7,
-                    is_safe=SafeUUID.safe
-                ) != chatbox_db.user_id:
-                    # We CANNOT change specified chatbox ownership
+            if len(chat_history_incoming_data) == len(chat_history_current_data):
+                if not validate_role_name(chat_history_data=chat_history_incoming_data):
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail={
                             "status": "400 - Bad Request",
-                            "message": "{trig:s}: {cond:s}".format(
-                                trig="Chatbox update forbidden",
-                                cond=f"Chatbox ownership (user ID) cannot be updated: {chatbox_db.user_id} --> {chatbox_user_id}"
-                            )
+                            "message": f"Immutable field found within provided fields."
                         }
                     )
 
-
                 else:
-                    # Case 1b:
-                    # Surgical chatbox name updates within full data updates
-                    if chatbox_name == chatbox_db.name:
-                        # Incoming data matched stored data so no need to
-                        # waste disk I/O for running update on nothing
-                        pass
+                    if all(
+                        chat_history_field in chat_history_block
+                        for chat_history_block in chat_history_incoming_data
+                        for chat_history_field in CHAT_HISTORY_FIELDS
+                    ):
+                        ### Chat history updates (Layer 2) ###
 
-                    else:
                         # NOTE:
-                        # We didn't use `sqlmodel_update()` method here since
-                        # specified chatbox ownership cannot be modified, but
-                        # we still have to provide the `user_id` data, which
-                        # this method will execute surgical update on BOTH
-                        # `user_id` & `name` data.
-                        chatbox_db.name = chatbox_name # pyright: ignore
-
-                        session.add(instance=chatbox_db)
+                        # This might be hard to read because we're trying to be
+                        # dynamic by leverage the type check from ORM for running
+                        # SQL query. The equivalent SQL syntax is:
+                        #   UPDATE
+                        #       chatboxes
+                        #   SET
+                        #       details = details::JSONB || [new_chat_history]::JSONB
+                        #   WHERE
+                        #       chatboxes.id = config_id
+                        #   RETURNING
+                        #       chatboxes.name,
+                        #       chatboxes.details,
+                        #       chatboxes.id,
+                        #       chatboxes.create_on
+                        chatbox_stmt: Update = (
+                            update(table=Chatboxes)
+                            .where(Chatboxes.id == chatbox_session_id)
+                            .values({
+                                Chatboxes.details: (
+                                    func.cast(Chatboxes.details, JSONB)
+                                ).op("||")(
+                                    # We only need the extra record, but Python list
+                                    # always start from index 0
+                                    func.cast(chat_history_incoming_data, JSONB)
+                                )
+                            })
+                            .returning(Chatboxes)
+                        )
+                        session.exec(statement=chatbox_stmt)
                         session.commit()
                         session.refresh(instance=chatbox_db)
 
-
-                    # Case 1c:
-                    # Surgical chatbox details updates within full data updates
-                    if chatbox_details == chatbox_db.details:
-                        # Incoming data matched stored data so no need to
-                        # waste disk I/O for running update on nothing
-                        pass
-
                     else:
-                        new_chat_history_size: int = len(chatbox_details)
-                        old_chat_history_size: int = len(chatbox_db.details)
+                        chat_history_block_new_data:      dict[ColumnElement, Any] = {}
+                        chat_history_block_new_target:    BinaryExpression[Any] = Chatboxes.details
 
-                        # Sub-case 1c - Scenario 1:
-                        # Continuously adding chat convo to current chat
-                        # history data
-                        if new_chat_history_size < old_chat_history_size:
-                            # Make sure valid roles provided in chat history
-                            role_name_validate: bool = await valid_role_name(chat_history_data=chatbox_details)
+                        for (chat_history_index, chat_history_block) in enumerate(chat_history_incoming_data):
+                            chat_history_current_block: dict[str, Any] = chat_history_current_data[chat_history_index]
 
-                            if not role_name_validate:
-                                raise HTTPException(
-                                    status_code=status.HTTP_400_BAD_REQUEST,
-                                    detail={
-                                        "status": "400 - Bad Request",
-                                        "message": "Invalid chat history data for updates!"
-                                    }
-                                )
+                            for chat_history_mutable_field in (
+                                "user_query",
+                                "llm_response"
+                            ):
+                                if (
+                                    chat_history_mutable_field in chat_history_block
+                                    and chat_history_block[chat_history_mutable_field] != chat_history_current_block[chat_history_mutable_field]
+                                ):
+                                    chat_history_block_new_data[chat_history_block_new_target[chat_history_index][chat_history_mutable_field]] = chat_history_block[chat_history_mutable_field]
 
-                            else:
-                                # NOTE:
-                                # Equivalent SQL query from this ORM style is:
-                                #   UPDATE
-                                #       chatboxes
-                                #   SET
-                                #       details = details::JSONB || [new_chat_history]::JSONB
-                                #   WHERE
-                                #       chatboxes.id = config_id
-                                #   RETURNING
-                                #       chatboxes.name,
-                                #       chatboxes.details,
-                                #       chatboxes.id,
-                                #       chatboxes.create_on
-                                for chat_history in chatbox_details:
-                                    chatbox_stmt: Update = (
-                                        update(table=Chatboxes)
-                                        .where(Chatboxes.id == chatbox_session_id)  # pyright: ignore
-                                        .values({
-                                            Chatboxes.details: (                    # pyright: ignore
-                                                func.cast(Chatboxes.details, JSONB) # pyright: ignore
-                                            ).op("||")(
-                                                func.cast(chat_history, JSONB)      # pyright: ignore
-                                            )
-                                        })
-                                        .returning(Chatboxes)
-                                    )
-                                    session.exec(statement=chatbox_stmt)
-                                session.commit()
+                        if chat_history_block_new_data:
+                            ### Surgical chat history updates (Layer 3) ###
 
-
-                        # Sub-case 1c - Scenario 2:
-                        # Surgical updates (could be 1 or many at once) to each
-                        # chat history data from specified chat session ID
-                        elif new_chat_history_size == old_chat_history_size:
                             # NOTE:
-                            # We still have to check for valid roles provided in the
-                            # chat history no matter which scenarios
-                            role_name_validate: bool = await valid_role_name(chat_history_data=chatbox_details)
+                            # This might be hard to read because we're trying to be
+                            # dynamic by leverage the type check from ORM for running
+                            # SQL query. The equivalent SQL syntax is:
+                            #   UPDATE
+                            #       chatboxes
+                            #   SET
+                            #       chatboxes['details'][chat_history_index][current key] = <new value>
+                            #   WHERE
+                            #       chatboxes.id = chatbox_session_id
+                            #   RETURNING
+                            #       chatboxes.user_id,
+                            #       chatboxes.name,
+                            #       chatboxes.details
+                            chatbox_stmt: Update = (
+                                update(table=Chatboxes)
+                                .where(Chatboxes.id == chatbox_session_id)
+                                .values(chat_history_block_new_data)
+                                .returning(Chatboxes)
+                            )
+                            session.exec(statement=chatbox_stmt)
+                            session.commit()
+                            session.refresh(instance=chatbox_db)
 
-                            if not role_name_validate:
-                                raise HTTPException(
-                                    status_code=status.HTTP_400_BAD_REQUEST,
-                                    detail={
-                                        "status": "400 - Bad Request",
-                                        "message": "Invalid chat history data for updates!"
-                                    }
-                                )
-
-                            else:
-                                # Sub-case 1c - Scenario 2 - Potential 1:
-                                # NOTE:
-                                # This's an edge case where user directly modify chat
-                                # convo after creating a new chat session.
-                                if  (new_chat_history_size == 1) \
-                                and (old_chat_history_size == 1):
-                                    # NOTE:
-                                    # Equivalent SQL query from this ORM style is:
-                                    #   UPDATE
-                                    #       chatboxes
-                                    #   SET
-                                    #       details = details::JSONB || [new_chat_history]::JSONB
-                                    #   WHERE
-                                    #       chatboxes.id = config_id
-                                    #   RETURNING
-                                    #       chatboxes.name,
-                                    #       chatboxes.details,
-                                    #       chatboxes.id,
-                                    #       chatboxes.create_on
-                                    for chat_history in chatbox_details:
-                                        chatbox_stmt: Update = (
-                                            update(table=Chatboxes)
-                                            .where(Chatboxes.id == chatbox_session_id)  # pyright: ignore
-                                            .values({
-                                                Chatboxes.details: (                    # pyright: ignore
-                                                    func.cast(Chatboxes.details, JSONB) # pyright: ignore
-                                                ).op("||")(
-                                                    func.cast(chat_history, JSONB)      # pyright: ignore
-                                                )
-                                            })
-                                            .returning(Chatboxes)
-                                        )
-                                        session.exec(statement=chatbox_stmt)
-                                    session.commit()
-
-
-                                # Sub-case 1c - Scenario 2 - Potential 2:
-                                # NOTE:
-                                # This's a normal case where user modify chat convo at
-                                # any places any times during the chat session.
-                                else:
-                                    new_chat_history:           dict[ColumnElement, Any]    = {}                    # pyright: ignore
-                                    new_chat_history_target:    BinaryExpression[Any]       = Chatboxes.details     # pyright: ignore
-                                    old_chat_history_target:    list[dict[str, Any]]        = chatbox_db.details    # pyright: ignore
-
-                                    for (
-                                        chat_history_idx,
-                                        chat_history
-                                    ) in enumerate(
-                                        iterable=chatbox_details,
-                                        start=0
-                                    ):
-                                        # Sub-case 1c - Scenario 2 - Potential 2.1:
-                                        # User role surgical updates
-                                        chat_user_role: str = chat_history["user_role"]
-
-                                        if chat_user_role != old_chat_history_target[chat_history_idx]["user_role"]:
-                                            new_chat_history[new_chat_history_target[chat_history_idx]["user_role"]] = chat_user_role
-
-
-                                        # Sub-case 1c - Scenario 2 - Potential 2.2:
-                                        # LLM role surgical updates
-                                        chat_llm_role: str = chat_history["llm_role"]
-
-                                        if chat_llm_role != old_chat_history_target[chat_history_idx]["llm_role"]:
-                                            new_chat_history[new_chat_history_target[chat_history_idx]["llm_role"]] = chat_llm_role
-
-
-                                        # Sub-case 1c - Scenario 2 - Potential 2.3:
-                                        # User query updates, which its timestamp must be
-                                        # updated as well to reflect accurate new changes
-                                        chat_user_query:            str         = chat_history["user_query"]
-
-                                        chat_user_timestamp:        str         = chat_history["query_create_on"]
-                                        chat_user_new_timestamp:    datetime    = datetime.fromisoformat(chat_user_timestamp)
-                                        chat_user_old_timestamp:    datetime    = datetime.fromisoformat(old_chat_history_target[chat_history_idx]["query_create_on"])
-
-                                        if chat_user_query != old_chat_history_target[chat_history_idx]["user_query"]:
-                                            new_chat_history[new_chat_history_target[chat_history_idx]["user_query"]] = chat_user_query
-
-                                        # NOTE:
-                                        # It's much more safe and accurate to compare
-                                        # timestamp value in its original form (datetime
-                                        # Object). The compiler will now understand that
-                                        # we're matching them in chronological logic instead.
-                                        if chat_user_new_timestamp != chat_user_old_timestamp:
-                                            new_chat_history[new_chat_history_target[chat_history_idx]["query_create_on"]] = chat_user_timestamp
-
-
-                                        # Sub-case 1c - Scenario 2 - Potential 2.4:
-                                        # LLM response updates, which its timestamp must be
-                                        # updated as well to reflect accurate new changes
-                                        chat_llm_response:      str         = chat_history["llm_response"]
-
-                                        chat_llm_timestamp:     str         = chat_history["response_create_on"]
-                                        chat_llm_new_timestamp: datetime    = datetime.fromisoformat(chat_llm_timestamp)
-                                        chat_llm_old_timestmap: datetime    = datetime.fromisoformat(old_chat_history_target[chat_history_idx]["response_create_on"])
-
-                                        if chat_llm_response != old_chat_history_target[chat_history_idx]["llm_response"]:
-                                            new_chat_history[new_chat_history_target[chat_history_idx]["llm_response"]] = chat_llm_response
-
-                                        # NOTE:
-                                        # It's much more safe and accurate to compare
-                                        # timestamp value in its original form (datetime
-                                        # Object). The compiler will now understand that
-                                        # we're matching them in chronological logic instead.
-                                        if chat_llm_new_timestamp != chat_llm_old_timestmap:
-                                            new_chat_history[new_chat_history_target[chat_history_idx]["response_create_on"]] = chat_llm_timestamp
-
-
-                                    if len(new_chat_history) == 0:
-                                        # Two scenarios can occured here:
-                                        # 1. Incoming data completely matched stored data
-                                        # => Do nothing. We don't want to waste disk
-                                        #    I/O for update with zero changes.
-                                        #
-                                        # 2. Something's rising and it isn't the shield hero...
-                                        # => Kindly ask user to submit a bug report
-                                        #    to us so we can investigate this as I
-                                        #    cannot think of one op top of my head.
-                                        pass
-
-                                    else:
-                                        # NOTE:
-                                        # Equivalent SQL query from this ORM style is:
-                                        #   UPDATE
-                                        #       chatboxes
-                                        #   SET
-                                        #       chatboxes['details'][chat_history_idx][current key] = <new value>
-                                        #   WHERE
-                                        #       chatboxes.id = chatbox_session_id
-                                        #   RETURNING
-                                        #       chatboxes.user_id,
-                                        #       chatboxes.name,
-                                        #       chatboxes.details
-                                        chatbox_stmt: Update = (
-                                            update(table=Chatboxes)
-                                            .where(Chatboxes.id == chatbox_session_id)  # pyright: ignore
-                                            .values(new_chat_history)
-                                            .returning(Chatboxes)
-                                        )
-                                        session.exec(statement=chatbox_stmt)
-                                        session.commit()
-
-
-                        # Sub-case 1c - Scenario 3:
-                        # Append the new tail 
-                        else:
-                            role_name_validate: bool = await valid_role_name(chat_history_data=chatbox_details)
-
-                            if not role_name_validate:
-                                raise HTTPException(
-                                    status_code=status.HTTP_400_BAD_REQUEST,
-                                    detail={
-                                        "status": "400 - Bad Request",
-                                        "message": "Invalid chat history data for updates!"
-                                    }
-                                )
-
-                            else:
-                                for chat_history in chatbox_details[old_chat_history_size:]:
-                                    chatbox_stmt: Update = (
-                                        update(table=Chatboxes)
-                                        .where(Chatboxes.id == chatbox_session_id)  # pyright: ignore
-                                        .values({
-                                            Chatboxes.details: (                    # pyright: ignore
-                                                func.cast(Chatboxes.details, JSONB) # pyright: ignore
-                                            ).op("||")(
-                                                func.cast(chat_history, JSONB)      # pyright: ignore
-                                            )
-                                        })
-                                        .returning(Chatboxes)
-                                    )
-                                    session.exec(statement=chatbox_stmt)
-                                session.commit()
-
-
-            # Case 2: partial data updates
-            else:
-                # Case 2a: partial chatbox ownership updates
-                if "user_id" not in chatbox_data:
-                    # We CANNOT update chatbox data without its ownership
+            if len(chat_history_incoming_data) < len(chat_history_current_data):
+                if not validate_role_name(chat_history_data=chat_history_incoming_data):
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail={
                             "status": "400 - Bad Request",
-                            "message": "{trig:s}: {cond:s}".format(
-                                trig="Chatbox update forbidden",
-                                cond="Chatbox ownership (user ID) required for valid PATCH request!"
-                            )
+                            "message": f"Immutable field found within provided fields."
                         }
                     )
 
                 else:
-                    chatbox_user_id: str = chatbox_data["user_id"]
+                    ### Chat history updates (Layer 2) ###
 
                     # NOTE:
-                    # It's much more safe and accurate to compare UUID value in its
-                    # original form (UUID Object). The compiler will now understand
-                    # that we're matching them in chronological logic instead.
-                    if UUID(
-                        hex=chatbox_user_id,
-                        version=7,
-                        is_safe=SafeUUID.safe
-                    ) != chatbox_db.user_id:
-                        # We CANNOT change specified chatbox ownership
+                    # This might be hard to read because we're trying to be
+                    # dynamic by leverage the type check from ORM for running
+                    # SQL query. The equivalent SQL syntax is:
+                    #   UPDATE
+                    #       chatboxes
+                    #   SET
+                    #       details = details::JSONB || [new_chat_history]::JSONB
+                    #   WHERE
+                    #       chatboxes.id = config_id
+                    #   RETURNING
+                    #       chatboxes.name,
+                    #       chatboxes.details,
+                    #       chatboxes.id,
+                    #       chatboxes.create_on
+                    chatbox_stmt: Update = (
+                        update(table=Chatboxes)
+                        .where(Chatboxes.id == chatbox_session_id)
+                        .values({
+                            Chatboxes.details: (
+                                func.cast(Chatboxes.details, JSONB)
+                            ).op("||")(
+                                func.cast(chat_history_incoming_data, JSONB)
+                            )
+                        })
+                        .returning(Chatboxes)
+                    )
+                    session.exec(statement=chatbox_stmt)
+                    session.commit()
+                    session.refresh(instance=chatbox_db)
+
+            if len(chat_history_incoming_data) > len(chat_history_current_data):
+                if not validate_role_name(chat_history_data=chat_history_incoming_data):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "status": "400 - Bad Request",
+                            "message": f"Immutable field found within provided fields."
+                        }
+                    )
+
+                else:
+                    try:
+                        if len(chat_history_incoming_data) == 1:
+                            # NOTE:
+                            # This's an edge case that only get executed when
+                            # user asking in a brand new chat session
+                            chatbox_db.sqlmodel_update(obj=chatbox_data)
+
+                            session.add(instance=chatbox_db)
+                            session.commit()
+                            session.refresh(instance=chatbox_db)
+
+                        else:
+                            # NOTE:
+                            # This's obviously an attempt to do API injection
+                            # attacks. Though, it'd be too obvious for the hackers
+                            # if we returns with the lame 400 error message so I
+                            # decided to give them a little panic :D
+                            raise HTTPException(
+                                status_code=status.HTTP_418_IM_A_TEAPOT,
+                                detail={
+                                    "status": "418 - I'm a teapot",
+                                    "message": f"Are you a fortune teller by any chance? It would be perfect if I get to know your location too."
+                                }
+                            )
+
+                    except IntegrityError as psycopg_err:
                         raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
+                            status_code=status.HTTP_409_CONFLICT,
                             detail={
-                                "status": "400 - Bad Request",
-                                "message": "{trig:s}: {cond:s}".format(
-                                    trig="Chatbox update forbidden",
-                                    cond=f"Chatbox ownership (user ID) cannot be updated: {chatbox_db.user_id} --> {chatbox_user_id}"
-                                )
+                                "status": "409 - Conflict",
+                                "message": f"{psycopg_err}"
                             }
                         )
 
-                    else:
-                        # Case 2b: partial chatbox name updates
-                        if "name" not in chatbox_data:
-                            # Update other data than chatbox name
-                            pass
+                    except TypeError as python_err:
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail={
+                                "status": "500 - Type Error",
+                                "message": f"{python_err}"
+                            }
+                        )
 
-                        else:
-                            chatbox_name: str = chatbox_data["name"]
+                    except ResponseValidationError as fastapi_err:
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail={
+                                "status": "500 - Response Validation Error",
+                                "message": f"{fastapi_err}"
+                            }
+                        )
 
-                            if chatbox_name == chatbox_db.name:
-                                # Incoming data matched stored data so no need to
-                                # waste disk I/O for running update on nothing
-                                pass
-
-                            else:
-                                # NOTE:
-                                # We didn't use `sqlmodel_update()` method here since
-                                # specified chatbox ownership cannot be modified, but
-                                # we still have to provide the `user_id` data, which
-                                # this method will execute surgical update on BOTH
-                                # `user_id` & `name` data.
-                                chatbox_db.name = chatbox_name
-
-                                session.add(instance=chatbox_db)
-                                session.commit()
-                                session.refresh(instance=chatbox_db)
-
-
-                        # Case 2c: partial chatbox details updates
-                        if "details" not in chatbox_data:
-                            # Update other data than chatbox details
-                            pass
-
-                        else:
-                            chatbox_details: list[dict[str, Any]] = chatbox_data["details"]
-
-                            if chatbox_details == chatbox_db.details:
-                                # Incoming data matched stored data so no need to
-                                # waste disk I/O for running update on nothing
-                                pass
-
-                            else:
-                                new_chat_history_size: int = len(chatbox_details)
-                                old_chat_history_size: int = len(chatbox_db.details)
-
-                                # Sub-case 2c - Scenario 1:
-                                # Continuously adding chat convo to current
-                                # chat history data
-                                if new_chat_history_size < old_chat_history_size:
-                                    # Make sure valid roles provided in chat history
-                                    role_name_validate: bool = await valid_role_name(chat_history_data=chatbox_details)
-
-                                    if not role_name_validate:
-                                        raise HTTPException(
-                                            status_code=status.HTTP_400_BAD_REQUEST,
-                                            detail={
-                                                "status": "400 - Bad Request",
-                                                "message": "Invalid chat history data for updates!"
-                                            }
-                                        )
-
-                                    else:
-                                        # NOTE:
-                                        # Equivalent SQL query from this ORM style is:
-                                        #   UPDATE
-                                        #       chatboxes
-                                        #   SET
-                                        #       details = details::JSONB || [new_chat_history]::JSONB
-                                        #   WHERE
-                                        #       chatboxes.id = config_id
-                                        #   RETURNING
-                                        #       chatboxes.name,
-                                        #       chatboxes.details,
-                                        #       chatboxes.id,
-                                        #       chatboxes.create_on
-                                        for chat_history in chatbox_details:
-                                            chatbox_stmt: Update = (
-                                                update(table=Chatboxes)
-                                                .where(Chatboxes.id == chatbox_session_id)  # pyright: ignore
-                                                .values({
-                                                    Chatboxes.details: (                    # pyright: ignore
-                                                        func.cast(Chatboxes.details, JSONB) # pyright: ignore
-                                                    ).op("||")(
-                                                        func.cast(chat_history, JSONB)      # pyright: ignore
-                                                    )
-                                                })
-                                                .returning(Chatboxes)
-                                            )
-                                            session.exec(statement=chatbox_stmt)
-                                        session.commit()
-
-
-                                # Sub-case 2c - Scenario 2:
-                                # Surgical updates (could be 1 or many at
-                                # once) to each chat history data from
-                                # specified chat session ID
-                                elif new_chat_history_size == old_chat_history_size:
-                                    # NOTE:
-                                    # We still have to check for valid roles provided in the
-                                    # chat history no matter which scenarios
-                                    role_name_validate: bool = await valid_role_name(chat_history_data=chatbox_details)
-
-                                    if not role_name_validate:
-                                        raise HTTPException(
-                                            status_code=status.HTTP_400_BAD_REQUEST,
-                                            detail={
-                                                "status": "400 - Bad Request",
-                                                "message": "Invalid chat history data for updates!"
-                                            }
-                                        )
-
-                                    else:
-                                        # Sub-case 2c - Scenario 2 - Potential 1:
-                                        # NOTE:
-                                        # This's an edge case where user directly modify chat
-                                        # convo after creating a new chat session.
-                                        if  (new_chat_history_size == 1) \
-                                        and (old_chat_history_size == 1):
-                                            # NOTE:
-                                            # Equivalent SQL query from this ORM style is:
-                                            #   UPDATE
-                                            #       chatboxes
-                                            #   SET
-                                            #       details = details::JSONB || [new_chat_history]::JSONB
-                                            #   WHERE
-                                            #       chatboxes.id = config_id
-                                            #   RETURNING
-                                            #       chatboxes.name,
-                                            #       chatboxes.details,
-                                            #       chatboxes.id,
-                                            #       chatboxes.create_on
-                                            for chat_history in chatbox_details:
-                                                chatbox_stmt: Update = (
-                                                    update(table=Chatboxes)
-                                                    .where(Chatboxes.id == chatbox_session_id)  # pyright: ignore
-                                                    .values({
-                                                        Chatboxes.details: (                    # pyright: ignore
-                                                            func.cast(Chatboxes.details, JSONB) # pyright: ignore
-                                                        ).op("||")(
-                                                            func.cast(chat_history, JSONB)      # pyright: ignore
-                                                        )
-                                                    })
-                                                    .returning(Chatboxes)
-                                                )
-                                                session.exec(statement=chatbox_stmt)
-                                            session.commit()
-
-
-                                        # Sub-case 2c - Scenario 2 - Potential 2:
-                                        # NOTE:
-                                        # This's a normal case where user modify chat convo at
-                                        # any places any times during the chat session.
-                                        else:
-                                            new_chat_history:           dict[ColumnElement, Any]    = {}                    # pyright: ignore
-                                            new_chat_history_target:    BinaryExpression[Any]       = Chatboxes.details     # pyright: ignore
-                                            old_chat_history_target:    list[dict[str, Any]]        = chatbox_db.details    # pyright: ignore
-
-                                            for (
-                                                chat_history_idx,
-                                                chat_history
-                                            ) in enumerate(
-                                                iterable=chatbox_details,
-                                                start=0
-                                            ):
-                                                # Sub-case 2c - Scenario 2 - Potential 2.1:
-                                                # User role surgical updates
-                                                chat_user_role: str = chat_history["user_role"]
-
-                                                if chat_user_role != old_chat_history_target[chat_history_idx]["user_role"]:
-                                                    new_chat_history[new_chat_history_target[chat_history_idx]["user_role"]] = chat_user_role
-
-
-                                                # Sub-case 2c - Scenario 2 - Potential 2.2:
-                                                # LLM role surgical updates
-                                                chat_llm_role: str = chat_history["llm_role"]
-
-                                                if chat_llm_role != old_chat_history_target[chat_history_idx]["llm_role"]:
-                                                    new_chat_history[new_chat_history_target[chat_history_idx]["llm_role"]] = chat_llm_role
-
-
-                                                # Sub-case 2c - Scenario 2 - Potential 2.3:
-                                                # User query updates, which its timestamp must be
-                                                # updated as well to reflect accurate new changes
-                                                chat_user_query:            str         = chat_history["user_query"]
-
-                                                chat_user_timestamp:        str         = chat_history["query_create_on"]
-                                                chat_user_new_timestamp:    datetime    = datetime.fromisoformat(chat_user_timestamp)
-                                                chat_user_old_timestamp:    datetime    = datetime.fromisoformat(old_chat_history_target[chat_history_idx]["query_create_on"])
-
-                                                if chat_user_query != old_chat_history_target[chat_history_idx]["user_query"]:
-                                                    new_chat_history[new_chat_history_target[chat_history_idx]["user_query"]] = chat_user_query
-
-                                                # NOTE:
-                                                # It's much more safe and accurate to compare
-                                                # timestamp value in its original form (datetime
-                                                # Object). The compiler will now understand that
-                                                # we're matching them in chronological logic instead.
-                                                if chat_user_new_timestamp != chat_user_old_timestamp:
-                                                    new_chat_history[new_chat_history_target[chat_history_idx]["query_create_on"]] = chat_user_timestamp
-
-
-                                                # Sub-case 2c - Scenario 2 - Potential 2.4:
-                                                # LLM response updates, which its timestamp must be
-                                                # updated as well to reflect accurate new changes
-                                                chat_llm_response:      str         = chat_history["llm_response"]
-
-                                                chat_llm_timestamp:     str         = chat_history["response_create_on"]
-                                                chat_llm_new_timestamp: datetime    = datetime.fromisoformat(chat_llm_timestamp)
-                                                chat_llm_old_timestmap: datetime    = datetime.fromisoformat(old_chat_history_target[chat_history_idx]["response_create_on"])
-
-                                                if chat_llm_response != old_chat_history_target[chat_history_idx]["llm_response"]:
-                                                    new_chat_history[new_chat_history_target[chat_history_idx]["llm_response"]] = chat_llm_response
-
-                                                # NOTE:
-                                                # It's much more safe and accurate to compare
-                                                # timestamp value in its original form (datetime
-                                                # Object). The compiler will now understand that
-                                                # we're matching them in chronological logic instead.
-                                                if chat_llm_new_timestamp != chat_llm_old_timestmap:
-                                                    new_chat_history[new_chat_history_target[chat_history_idx]["response_create_on"]] = chat_llm_timestamp
-
-
-                                            # TODO: some sort of `verbose` argument toggle for debug only
-                                            #print(
-                                            #    "{head_sep:s}{body_msg:s}{foot_sep:s}".format(
-                                            #        head_sep=f"{'=' * 80}\n",
-                                            #        body_msg="[DEBUG]   UPDATE CHAT HISTORY DATA\n",
-                                            #        foot_sep=f"{'=' * 80}\n"
-                                            #    )
-                                            #)
-                                            #pp(
-                                            #    object=new_chat_history,
-                                            #    stream=stdout,
-                                            #    indent=4 # Prefer tab over spaces indentation
-                                            #)
-
-
-                                            if len(new_chat_history) == 0:
-                                                # Two scenarios can occured here:
-                                                # 1. Incoming data completely matched stored data
-                                                # => Do nothing. We don't want to waste disk
-                                                #    I/O for update with zero changes.
-                                                #
-                                                # 2. Something's rising and it isn't the shield hero...
-                                                # => Kindly ask user to submit a bug report
-                                                #    to us so we can investigate this as I
-                                                #    cannot think of one op top of my head.
-                                                pass
-
-                                            else:
-                                                # NOTE:
-                                                # Equivalent SQL query from this ORM style is:
-                                                #   UPDATE
-                                                #       chatboxes
-                                                #   SET
-                                                #       chatboxes['details'][chat_history_idx][current key] = <new value>
-                                                #   WHERE
-                                                #       chatboxes.id = chatbox_session_id
-                                                #   RETURNING
-                                                #       chatboxes.user_id,
-                                                #       chatboxes.name,
-                                                #       chatboxes.details
-                                                chatbox_stmt: Update = (
-                                                    update(table=Chatboxes)
-                                                    .where(Chatboxes.id == chatbox_session_id)  # pyright: ignore
-                                                    .values(new_chat_history)                   # pyright: ignore
-                                                    .returning(Chatboxes)
-                                                )
-                                                session.exec(statement=chatbox_stmt)
-                                                session.commit()
-
-
-                                # Sub-case 2c - Scenario 3:
-                                # Append the new tail
-                                else:
-                                    role_name_validate: bool = await valid_role_name(chat_history_data=chatbox_details)
-
-                                    if not role_name_validate:
-                                        raise HTTPException(
-                                            status_code=status.HTTP_400_BAD_REQUEST,
-                                            detail={
-                                                "status": "400 - Bad Request",
-                                                "message": "Invalid chat history data for updates!"
-                                            }
-                                        )
-
-                                    else:
-                                        for chat_history in chatbox_details[old_chat_history_size:]:
-                                            chatbox_stmt: Update = (
-                                                update(table=Chatboxes)
-                                                .where(Chatboxes.id == chatbox_session_id)  # pyright: ignore
-                                                .values({
-                                                    Chatboxes.details: (                    # pyright: ignore
-                                                        func.cast(Chatboxes.details, JSONB) # pyright: ignore
-                                                    ).op("||")(
-                                                        func.cast(chat_history, JSONB)      # pyright: ignore
-                                                    )
-                                                })
-                                                .returning(Chatboxes)
-                                            )
-                                            session.exec(statement=chatbox_stmt)
-                                        session.commit()
-
-
-            # Updated chatbox data can be:
-            #   1. Full updates
-            #   2. Partical updates
-            #       2.1. Simple key-value pairs
-            #       2.2. Complex key-value pairs (chat history)
-            #           2.2.1. Continuous chat hisory updates
-            #           2.2.2. Surgical chat history updates
-            return {
-                "success": True,
-                "updated": chatbox_db
-            }
-
+        return {
+            "success": True,
+            "updated": chatbox_db
+        }
 
     except IntegrityError as psycopg_err:
         raise HTTPException(
@@ -912,7 +550,6 @@ async def update_chatbox_v1(
             }
         )
 
-
     except TypeError as python_err:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -921,7 +558,6 @@ async def update_chatbox_v1(
                 "message": f"{python_err}"
             }
         )
-
 
     except ResponseValidationError as fastapi_err:
         raise HTTPException(

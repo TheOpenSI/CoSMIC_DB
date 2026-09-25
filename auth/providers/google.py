@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from jwt import PyJWKClient
 
 from auth import config
-from auth.providers.base import NormalizedClaims, TokenBundle
+from auth.providers.base import NormalizedClaims, TokenBundle, OAuthProvider
 
 _jwks_client: PyJWKClient | None = None
 
@@ -18,7 +18,7 @@ def _get_jwks() -> PyJWKClient:
     return _jwks_client
 
 
-class GoogleProvider:
+class GoogleProvider(OAuthProvider):
     name = "google"
 
     def authorize_url(self, state: str, redirect_uri: str) -> str:
@@ -110,3 +110,32 @@ class GoogleProvider:
                 )
         except httpx.HTTPError:
             return
+
+    async def refresh(self, refresh_token: str) -> TokenBundle:
+        token_url = config.GOOGLE_TOKEN_URL
+        data = {
+            "grant_type": "refresh_token",
+            "client_id": config.GOOGLE_CLIENT_ID,
+            "client_secret": config.GOOGLE_CLIENT_SECRET,
+            "refresh_token": refresh_token,
+            "scope": "openid email profile",
+
+        }
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(token_url, data=data)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=401, detail=f"Google token refresh failed: {resp.text}")
+        payload = resp.json()
+        access_token = payload.get("access_token")
+        if not access_token:
+            raise HTTPException(status_code=502, detail="No access token returned")
+        return TokenBundle(
+            access_token=access_token,
+            refresh_token=payload.get("refresh_token") or refresh_token,
+            id_token=payload.get("id_token"),
+            expires_in=payload.get("expires_in", 3600),
+            refresh_expires_in=None,  # Google often omits this
+            raw=payload,
+        )
+
