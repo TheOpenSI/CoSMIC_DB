@@ -251,7 +251,7 @@ async def read_user_token_rolling_v1(
         labels,
         rolling_total_inputs,
         rolling_total_outputs
-    ): tuple[list[str], list[int | None], list[int | None]] = (
+    ) = (
         [],
         [],
         []
