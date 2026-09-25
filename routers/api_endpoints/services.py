@@ -1,4 +1,10 @@
 ### Core modules ###
+from re import (
+    IGNORECASE,
+    MULTILINE,
+    VERBOSE,
+    sub
+)
 from fastapi import (
     APIRouter,
     HTTPException,
@@ -222,6 +228,34 @@ async def update_service_v1(
                     "message": f"Incoming service name [{service_name}] matched current service name [{service_db.name}]."
                 }
             )
+
+        # Normalise input by lowering case and stripping non-alphanumeric characters
+        service_normalised_name: str = sub(
+            pattern=r'[^a-z0-9]',
+            repl='',
+            string=service_name.lower(),
+            count=0,
+            flags=
+                MULTILINE   |
+                IGNORECASE  |
+                VERBOSE
+        )
+
+        # Check for bypass or attempts to do API injection attacks
+        if any(
+            core_service in service_normalised_name
+            for core_service in CORE_SERVICES
+        ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    # NOTE:
+                    # just being a little humour here instead of the lame 400
+                    # error message since this's definitely an attack
+                    detail={
+                        "status": "400 - Bad Request",
+                        "message": f"This is way too classic. Can you try something harder?"
+                    }
+                )
 
         service_name_uniqueness: str | None = session.exec(
             statement=select(
