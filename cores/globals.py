@@ -1,4 +1,8 @@
 ### Core modules ###
+from datetime import (
+    datetime,
+    timezone
+)
 
 
 ### Type hints ###
@@ -6,12 +10,15 @@ from typing import Any
 
 
 ### Internal modules ###
-from datetime import datetime, timezone
 
 
 
-USER_ROLE:  str = 'user'
-LLM_ROLE:   str = 'assistant'
+USER_ROLE: str = 'user'
+LLM_ROLE: str = 'assistant'
+SYSTEM_ROLES: tuple[str, ...] = (
+    "admin", 
+    "user"
+)
 CORE_SERVICES: tuple[str, ...] = (
     "chess",
     "memory",
