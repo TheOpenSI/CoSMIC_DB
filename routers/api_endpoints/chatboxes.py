@@ -227,7 +227,22 @@ async def read_chatbox_v1(
     path="/{chatbox_session_id}",
     status_code=status.HTTP_200_OK,
     response_model=ChatboxUpdateResponse,
-    responses={**OPENAPI_PATCH_EXTRA_RESPONSES}
+    responses={
+        **OPENAPI_PATCH_EXTRA_RESPONSES,
+        418: {
+            "description": "API Injection Attacks",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": {
+                            "status": "418 - I'm a teapot",
+                            "message": "string"
+                        }
+                    }
+                }
+            }
+        }
+    }
 )
 async def update_chatbox_v1(
     chatbox_session_id: UUID7,
@@ -457,6 +472,69 @@ async def update_chatbox_v1(
                     session.exec(statement=chatbox_stmt)
                     session.commit()
                     session.refresh(instance=chatbox_db)
+
+            if len(chat_history_incoming_data) > len(chat_history_current_data):
+                if not validate_role_name(chat_history_data=chat_history_incoming_data):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "status": "400 - Bad Request",
+                            "message": f"Immutable field found within provided fields."
+                        }
+                    )
+
+                else:
+                    try:
+                        if len(chat_history_incoming_data) == 1:
+                            # NOTE:
+                            # This's an edge case that only get executed when
+                            # user asking in a brand new chat session
+                            chatbox_db.sqlmodel_update(obj=chatbox_data)
+
+                            session.add(instance=chatbox_db)
+                            session.commit()
+                            session.refresh(instance=chatbox_db)
+
+                        else:
+                            # NOTE:
+                            # This's obviously an attempt to do API injection
+                            # attacks. Though, it'd be too obvious for the hackers
+                            # if we returns with the lame 400 error message so I
+                            # decided to give them a little panic :D
+                            raise HTTPException(
+                                status_code=status.HTTP_418_IM_A_TEAPOT,
+                                detail={
+                                    "status": "418 - I'm a teapot",
+                                    "message": f"Are you a fortune teller by any chance? It would be perfect if I get to know your location too."
+                                }
+                            )
+
+                    except IntegrityError as psycopg_err:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail={
+                                "status": "409 - Conflict",
+                                "message": f"{psycopg_err}"
+                            }
+                        )
+
+                    except TypeError as python_err:
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail={
+                                "status": "500 - Type Error",
+                                "message": f"{python_err}"
+                            }
+                        )
+
+                    except ResponseValidationError as fastapi_err:
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail={
+                                "status": "500 - Response Validation Error",
+                                "message": f"{fastapi_err}"
+                            }
+                        )
 
         return {
             "success": True,
