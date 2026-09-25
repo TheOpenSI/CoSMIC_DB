@@ -67,7 +67,8 @@ async def callback_provider(
         cosmic_session.read_session(request)
         # Already logged in to avoid double callback 
         return HTMLResponse(
-            content="""\
+            content=\
+            """
             <!doctype html>
             <html lang="en">
             <head>
@@ -83,8 +84,9 @@ async def callback_provider(
                 }, 3000);
                 </script>
             </body>
-            </html>""",
-                        status_code=200,
+            </html>
+            """,
+            status_code=200
         )
     except HTTPException:
         pass
