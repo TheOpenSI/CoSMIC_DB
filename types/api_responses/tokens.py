@@ -5,7 +5,9 @@ from pydantic import (
 )
 
 
+
 ### Type hints ###
+from pydantic.types import UUID7
 
 
 ### Internal modules ###
@@ -47,3 +49,14 @@ class InquiryCycleTokenPublicResponse(BaseModel):
 
     success:    bool
     result:     InquiryCycleTokenPublic
+
+
+class UserTokenRollingStatsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    success:        bool
+    user_id:        UUID7
+    months:         int
+    labels:         list[str]
+    input_totals:   list[int | None]
+    output_totals:  list[int | None] 

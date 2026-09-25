@@ -2,9 +2,14 @@
 from fastapi import (
     APIRouter,
     HTTPException,
-    status
+    status, 
+    Query
 )
 from sqlmodel import select
+from datetime import (
+    datetime,
+    timezone
+)
 
 
 ### Type hints ###
@@ -15,7 +20,11 @@ from ...types.tags import APITag
 
 ### Internal modules ###
 from ...cores.db import SessionDependency
-from ...cores.globals import OPENAPI_GET_EXTRA_RESPONSES
+from ...cores.globals import (
+    OPENAPI_GET_EXTRA_RESPONSES,
+    MONTH_LABELS,
+    get_rolling_year_months
+)
 from ...apis.table_models.users import Users
 from ...apis.table_models.chatboxes import Chatboxes
 from ...types.api_responses.tokens import (
@@ -23,7 +32,8 @@ from ...types.api_responses.tokens import (
     SystemTokenPublicResponse,
     UserTokenPublicResponse,
     ChatboxSessionTokenPublicResponse,
-    InquiryCycleTokenPublicResponse
+    InquiryCycleTokenPublicResponse,
+    UserTokenRollingStatsResponse
 )
 from ...utils.tokens import get_io_token
 
@@ -164,6 +174,107 @@ async def read_chatbox_session_token_v1(
             "chatbox_session_output_token": total_chatbox_session_output_token
         }
     }
+
+
+@tokens_v1_router.get(
+    path="/user/{user_id}/rolling",
+    status_code=status.HTTP_200_OK,
+    response_model=UserTokenRollingStatsResponse,
+    responses={**OPENAPI_GET_EXTRA_RESPONSES}
+)
+async def read_user_token_rolling_v1(
+    user_id: UUID7,
+    session: SessionDependency,
+    months: int = Query(default=3, ge=3, le=12),
+) -> Any:
+    if months not in (3, 6, 12):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="months must be 3, 6, or 12"
+        )
+
+    user_db: Users | None = session.get(
+        entity=Users,
+        ident=user_id
+    )
+
+    if user_db is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User Not Found!"
+        )
+
+    year_months = get_rolling_year_months(months)
+    window_start: datetime = datetime(
+        year=year_months[0][0],
+        month=year_months[0][1],
+        day=1,
+        tzinfo=timezone.utc
+    )
+
+    chatboxes_db: list[list[dict[str, str | int]]] = session.exec(
+        statement=select(
+            Chatboxes.details
+        ).where(
+            Chatboxes.user_id == user_id
+        )
+    ).all()
+
+    rolling_input: dict[tuple[int, int], int] = {}
+    rolling_output: dict[tuple[int, int], int] = {}
+
+    for chatbox in chatboxes_db:
+        if not chatbox:
+            continue
+
+        for chat_history in chatbox:
+            ts = chat_history.get("query_create_on")
+            if ts is None:
+                continue
+
+            if isinstance(ts, str):
+                ts = datetime.fromisoformat(ts)
+
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+
+            if ts < window_start:
+                continue
+
+            key = (ts.year, ts.month)
+            inp, out = get_io_token(payload=chat_history)
+            rolling_input[key] = rolling_input.get(key, 0) + inp
+            rolling_output[key] = rolling_output.get(key, 0) + out
+
+    spans_multiple_years = len({y for y, _ in year_months}) > 1
+    (
+        labels,
+        rolling_total_inputs,
+        rolling_total_outputs
+    ): tuple[list[str], list[int | None], list[int | None]] = (
+        [],
+        [],
+        []
+    )
+
+    for year, month in year_months:
+        if spans_multiple_years:
+            labels.append(f"{MONTH_LABELS[month - 1]} '{str(year)[2:]}'")
+        else:
+            labels.append(MONTH_LABELS[month - 1])
+
+        rolling_total_inputs.append(rolling_input.get((year, month)))
+        rolling_total_outputs.append(rolling_output.get((year, month)))
+
+    return {
+        "success": True,
+        "user_id": user_id,
+        "months": months,
+        "labels": labels,
+        "input_totals": rolling_total_inputs,
+        "output_totals": rolling_total_outputs,
+    }
+
 
 
 @tokens_v1_router.get(
