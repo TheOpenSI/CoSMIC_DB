@@ -22,8 +22,11 @@ def _cookie_kwargs(max_age: int | None = None) -> dict:
     return kwargs
 
 
-def issue_session_token(claims: NormalizedClaims,user_id: UUID) -> str:
-    """Build a Cosmic JWT from normalized IdP claims."""
+def issue_session_token(
+    claims: NormalizedClaims,
+    user_id: UUID,
+    refresh_exp: int,
+) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": claims.sub,
@@ -32,18 +35,25 @@ def issue_session_token(claims: NormalizedClaims,user_id: UUID) -> str:
         "roles": claims.roles,
         "provider": claims.provider,
         "user_id": str(user_id),
+        "refresh_exp": refresh_exp,
         "iat": now,
         "exp": now + timedelta(seconds=config.SESSION_MAX_AGE),
     }
     return jwt.encode(payload, config.SESSION_SECRET, algorithm="HS256")
 
 
-def set_session_cookie(response: Response, claims: NormalizedClaims,user_id: UUID) -> None:
-    token = issue_session_token(claims, user_id)
+def set_session_cookie(
+    response: Response,
+    claims: NormalizedClaims,
+    user_id: UUID,
+    refresh_exp: int,
+) -> None:
+    remaining = refresh_exp - int(datetime.now(timezone.utc).timestamp())
+    token = issue_session_token(claims, user_id, refresh_exp)
     response.set_cookie(
         config.SESSION_COOKIE_NAME,
         token,
-        **_cookie_kwargs(config.REFRESH_COOKIE_MAX_AGE),
+        **_cookie_kwargs(max(remaining, 0)),
     )
 
 

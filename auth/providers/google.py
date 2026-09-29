@@ -99,7 +99,6 @@ class GoogleProvider(OAuthProvider):
         )
 
     async def logout(self, refresh_token: str | None) -> None:
-        # Optional: revoke at Google. Clearing Cosmic cookies is enough for now.
         if not refresh_token:
             return
         try:

@@ -1,5 +1,4 @@
-from dataclasses import dataclass, field
-from typing import Protocol
+
 
 from urllib.parse import urlencode
 
@@ -9,11 +8,11 @@ from fastapi import HTTPException
 from jwt import PyJWKClient
 
 from auth import config
-from auth.providers.base import NormalizedClaims, TokenBundle
+from auth.providers.base import NormalizedClaims, TokenBundle , OAuthProvider
 
 
 
-class AzureProvider:
+class AzureProvider(OAuthProvider):
     name = "azure"
 
     def authorize_url(self, state: str, redirect_uri: str) -> str:
@@ -30,7 +29,7 @@ class AzureProvider:
         }
         return f"{config.AZURE_AD_AUTH_URL}?{urlencode(params)}"
         
-        """Build IdP authorize URL."""
+        
 
     async def exchange_code(self, code: str, redirect_uri: str) -> TokenBundle:
         if not config.AZURE_AD_CLIENT_ID or not config.AZURE_AD_CLIENT_SECRET:
@@ -67,7 +66,7 @@ class AzureProvider:
             refresh_expires_in=None,  # azure omits this
             raw=payload,
         )
-        """Swap authorization code for tokens."""
+        
 
     def normalize_claims(self, tokens: TokenBundle) -> NormalizedClaims:
         if not tokens.id_token:
@@ -96,9 +95,37 @@ class AzureProvider:
             roles=[], #no roles as of the momment
         )
     
-        """Map IdP tokens → one Cosmic claim shape."""
+        
 
     async def logout(self, refresh_token: str | None) -> None:
         pass  # Azure AD does not provide a standard logout endpoint for refresh tokens
 
-        """Optional IdP-side logout."""
+        
+    async def refresh(self, refresh_token: str) -> TokenBundle:
+        token_url = config.AZURE_AD_TOKEN_URL
+        data = {
+            "grant_type": "refresh_token",
+            "client_id": config.AZURE_AD_CLIENT_ID,
+            "client_secret": config.AZURE_AD_CLIENT_SECRET,
+            "refresh_token": refresh_token,
+            "scope": "openid profile email offline_access",
+        }
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(token_url, data=data)
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=401,
+                detail=f"Azure AD token refresh failed : {resp.text}",
+            )
+        payload = resp.json()
+        access_token = payload.get("access_token")
+        if not access_token:
+            raise HTTPException(status_code=502, detail="No access token returned")
+        return TokenBundle(
+            access_token=access_token,
+            refresh_token=payload.get("refresh_token") or refresh_token,
+            id_token=payload.get("id_token"),
+            expires_in=payload.get("expires_in", 3600),
+            refresh_expires_in=None,
+            raw=payload,
+        )
