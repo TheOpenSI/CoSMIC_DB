@@ -10,33 +10,32 @@ from sqlmodel import select
 
 
 ### Type hints ###
+from collections.abc import Sequence
+from pydantic.types import PositiveInt
+from sqlalchemy.exc import IntegrityError
 from sqlmodel.sql.expression import SelectOfScalar
+from ...types.tags import APITag
 from typing import (
     Annotated,
     Any
 )
-from collections.abc import Sequence
-from ...types.tags import APITag
-from pydantic.types import PositiveInt
-from sqlalchemy.exc import IntegrityError
 
 
 ### Internal modules ###
-from ...cores.db import SessionDependency
-from ...cores.globals import (
-    CORE_SERVICES,
-    OPENAPI_GET_EXTRA_RESPONSES,
-    OPENAPI_POST_EXTRA_RESPONSES,
-    OPENAPI_PATCH_EXTRA_RESPONSES,
-    OPENAPI_DELETE_EXTRA_RESPONSES
-)
-from ...interfaces.apis.services import ServiceImmutableFieldValidator
 from ...apis.table_models.services import Services
 from ...apis.data_models.services import (
     # For validation (Data Model)
     ServiceCreate,
     ServiceUpdate
 )
+from ...cores.db import SessionDependency
+from ...cores.globals import (
+    OPENAPI_GET_EXTRA_RESPONSES,
+    OPENAPI_POST_EXTRA_RESPONSES,
+    OPENAPI_PATCH_EXTRA_RESPONSES,
+    OPENAPI_DELETE_EXTRA_RESPONSES
+)
+from ...interfaces.apis.services import ServiceImmutableFieldValidator
 from ...types.api_responses.services import (
     # For client responses (Responses Model)
     ServicesPublicResponse,
@@ -48,7 +47,6 @@ from ...types.api_responses.services import (
 from ...types.filter_params import (
     ServiceFilterParams
 )
-
 
 
 services_v1_router: APIRouter = APIRouter(
@@ -118,7 +116,7 @@ async def create_service_v1(
     ).first()
 
     if service_name_uniqueness:
-        if service_name_uniqueness in CORE_SERVICES:
+        if service_name_uniqueness in ServiceImmutableFieldValidator.RESERVED_VALUES:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
@@ -197,8 +195,8 @@ async def update_service_v1(
         Depends(ServiceImmutableFieldValidator)
     ]
 ) -> Any:
-    # Default core services are immutable: reject ANY modification up front
-    service_db: Services = immutable_field_validator.validate_immutable_target(service_id)
+    # Reject any modification up front since default core services are immutable
+    service_db: Services = immutable_field_validator.validate_immutable_target(service_id=service_id)
 
     service_data: dict[str, Any] = service.model_dump(
         mode="json",
@@ -220,7 +218,7 @@ async def update_service_v1(
         service_name: str = service_data["name"]
 
         # Reject names mimicking a reserved core service (injection attempts)
-        immutable_field_validator.validate_reserved_value(service_name)
+        immutable_field_validator.validate_reserved_value(candidate=service_name)
 
         if service_name.lower() == service_db.name.lower():
             raise HTTPException(

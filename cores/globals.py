@@ -19,32 +19,6 @@ SYSTEM_ROLES: tuple[str, ...] = (
     "admin",
     "user"
 )
-CORE_SERVICES: set[str] = {
-    "chess",
-    "memory",
-    "code_generation",
-    "general_question_answering",
-    "academic_governance"
-}
-# Filler words an attacker may inject around/inside a core service name to
-# disguise it (e.g., 'service_chess', 'ch_service_ess', 'core-memory')
-CORE_SERVICES_NOISES: tuple[str, ...] = (
-    "service",
-    "services",
-    "core",
-    "core_service",
-    "default",
-    "system",
-    "srv",
-    "svc",
-    "official"
-)
-# Similarity policy for catching near-miss (e.g., L337) immutable fields mimicry.
-# For example, a single edit on a short core service name (e.g., 'chess') dips
-# well below these values, so a low bar here still keeps distinct, unrelated
-# names allowed
-IMMUTABLE_FIELD_FUZZY_RATIO_THRESHOLD: int = 85
-IMMUTABLE_FIELD_FUZZY_PARTIAL_RATIO_THRESHOLD: int = 90
 
 
 OPENAPI_GET_EXTRA_RESPONSES: dict[int | str, dict[str, Any]] = {
