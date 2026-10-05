@@ -12,6 +12,8 @@ dependencies = [
     "sqlmodel>=0.0.37",
     "httpx>=0.28.0",
     "pyjwt[crypto]>=2.10.0",
+    # NOTE: Used to detect near-miss (e.g. L337) immutable field value mimicry.
+    "rapidfuzz>=3.14.5",
 ]
 
 

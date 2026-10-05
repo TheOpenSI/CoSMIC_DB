@@ -14,12 +14,16 @@ from pydantic.types import PositiveInt
 from ..abstracts.validators import ImmutableFieldValidator
 from ...libraries.l337.matcher import (
     ImmutableFieldExactMatcher,
-    ImmutableFieldFillerStripMatcher
+    ImmutableFieldFillerStripMatcher,
+    ImmutableFieldFuzzyMatcher,
+    ImmutableFieldLeetRegexMatcher
 )
 from ...cores.db import SessionDependency
 from ...cores.globals import (
     CORE_SERVICES,
-    CORE_SERVICES_NOISES
+    CORE_SERVICES_NOISES,
+    IMMUTABLE_FIELD_FUZZY_PARTIAL_RATIO_THRESHOLD,
+    IMMUTABLE_FIELD_FUZZY_RATIO_THRESHOLD
 )
 from ...apis.table_models.services import Services
 
@@ -42,7 +46,12 @@ class ServiceImmutableFieldValidator(ImmutableFieldValidator):
         super().__init__(
             matchers=(
                 ImmutableFieldExactMatcher(),
-                ImmutableFieldFillerStripMatcher(CORE_SERVICES_NOISES)
+                ImmutableFieldLeetRegexMatcher(),
+                ImmutableFieldFillerStripMatcher(CORE_SERVICES_NOISES),
+                ImmutableFieldFuzzyMatcher(
+                    ratio_threshold=IMMUTABLE_FIELD_FUZZY_RATIO_THRESHOLD,
+                    partial_ratio_threshold=IMMUTABLE_FIELD_FUZZY_PARTIAL_RATIO_THRESHOLD
+                )
             )
         )
         self._session = session
