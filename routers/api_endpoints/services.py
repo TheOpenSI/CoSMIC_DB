@@ -1,12 +1,7 @@
 ### Core modules ###
-from re import (
-    IGNORECASE,
-    MULTILINE,
-    VERBOSE,
-    sub
-)
 from fastapi import (
     APIRouter,
+    Depends,
     HTTPException,
     Query,
     status
@@ -35,6 +30,7 @@ from ...cores.globals import (
     OPENAPI_PATCH_EXTRA_RESPONSES,
     OPENAPI_DELETE_EXTRA_RESPONSES
 )
+from ...interfaces.apis.services import ServiceImmutableFieldValidator
 from ...apis.table_models.services import Services
 from ...apis.data_models.services import (
     # For validation (Data Model)
@@ -105,7 +101,11 @@ async def read_services_v1(
 )
 async def create_service_v1(
     service: ServiceCreate,
-    session: SessionDependency
+    session: SessionDependency,
+    immutable_field_validator: Annotated[
+        ServiceImmutableFieldValidator,
+        Depends(ServiceImmutableFieldValidator)
+    ]
 ) -> Any:
     # Validation against 'name' field in payload
     service_name_uniqueness: str | None = session.exec(
@@ -124,17 +124,19 @@ async def create_service_v1(
                 detail={
                     "status": "409 - Conflict",
                     "message": f"Default core service [{service_name_uniqueness}] has been reserved."
-                    }
-                )
+                }
+            )
 
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "status": "409 - Conflict",
-                    "message": f"A service with the name [{service_name_uniqueness}] already exists."
-                    }
-                )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "status": "409 - Conflict",
+                "message": f"A service with the name [{service_name_uniqueness}] already exists."
+            }
+        )
+
+    # Reject names mimicking a reserved core service (injection attempts)
+    immutable_field_validator.validate_reserved_value(service.name)
 
     # Only perform INSERT query if payload actually contains new data
     service_db: Services = Services.model_validate(
@@ -189,18 +191,14 @@ async def read_service_v1(
 async def update_service_v1(
     service_id: PositiveInt,
     service: ServiceUpdate,
-    session: SessionDependency
+    session: SessionDependency,
+    immutable_field_validator: Annotated[
+        ServiceImmutableFieldValidator,
+        Depends(ServiceImmutableFieldValidator)
+    ]
 ) -> Any:
-    service_db: Services | None = session.get(
-        entity=Services,
-        ident=service_id
-    )
-
-    if service_db is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Service Not Found!"
-        )
+    # Default core services are immutable: reject ANY modification up front
+    service_db: Services = immutable_field_validator.validate_immutable_target(service_id)
 
     service_data: dict[str, Any] = service.model_dump(
         mode="json",
@@ -219,18 +217,12 @@ async def update_service_v1(
 
     # Default core services name cannot be modified/renamed at application level
     if "name" in service_data:
-        service_name: str = service_data["name"].lower()
+        service_name: str = service_data["name"]
 
-        if service_name in CORE_SERVICES:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "status": "400 - Bad Request",
-                    "message": f"Default core service [{service_name}] cannot be modified."
-                }
-            )
+        # Reject names mimicking a reserved core service (injection attempts)
+        immutable_field_validator.validate_reserved_value(service_name)
 
-        if service_name == service_db.name:
+        if service_name.lower() == service_db.name.lower():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
@@ -239,30 +231,8 @@ async def update_service_v1(
                 }
             )
 
-        # Normalise input by strip everything except lowercase letters and underscores
-        service_normalised_name: str = sub(
-            pattern=r'[^a-z_]',
-            repl='',
-            string=service_name.lower(),
-            count=0,
-            flags=
-                MULTILINE   |
-                IGNORECASE  |
-                VERBOSE
-        )
-
-        # Check for bypass or attempts to do API injection attacks
-        if service_normalised_name not in CORE_SERVICES:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                # NOTE:
-                # just being a little humour here instead of the lame 400
-                # error message since this's definitely an attack
-                detail={
-                    "status": "400 - Bad Request",
-                    "message": f"This is way too classic. Can you try something harder?"
-                }
-            )
+        # Prefer service name to get stored in lowercase per db convention
+        service_name = service_name.lower()
 
         service_name_uniqueness: str | None = session.exec(
             statement=select(
@@ -283,7 +253,7 @@ async def update_service_v1(
                 }
             )
 
-        service_db.name = service_name
+        service_data["name"] = service_name
 
     # Only perform UPDATE query if payload actually contains new data
     try:
