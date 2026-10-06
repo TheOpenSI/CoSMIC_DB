@@ -6,7 +6,9 @@ from fastapi import (
 
 
 ### Type hints ###
+from collections.abc import Mapping
 from typing import (
+    Any,
     ClassVar,
     Final,
     override
@@ -51,6 +53,11 @@ class ServiceImmutableFieldValidator(ImmutableFieldValidator):
             "code_generation",
             "general_question_answering",
             "academic_governance"
+        }
+    )
+    IMMUTABLE_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "name"
         }
     )
 
@@ -102,17 +109,19 @@ class ServiceImmutableFieldValidator(ImmutableFieldValidator):
 
     def validate_immutable_target(
         self,
-        service_id: PositiveInt
+        service_id:     PositiveInt,
+        service_data:   Mapping[str, Any]
     ) -> Services:
         """
-        Resolve the service being updated and enforce core service immutability.
+        Resolve the service being updated and guard its immutable fields.
 
-        A default core service is immutable, so any update request targeting
-        one is rejected regardless of which fields the payload carries.
+        Only the declared `IMMUTABLE_FIELDS` are off-limits once the target is
+        a default core service; every other field stays updatable.
 
         Raises:
             HTTPException:
-                404 when missing, 403 when the target is a core service.
+                404 when missing, 403 when the payload touches an immutable
+                field of a core service.
         """
         service_db: Services | None = self._session.get(
             entity=Services,
@@ -125,12 +134,18 @@ class ServiceImmutableFieldValidator(ImmutableFieldValidator):
                 detail="Service Not Found!"
             )
 
-        if service_db.name.lower() in self.RESERVED_VALUES:
+        if (
+            self.is_reserved_value(value=service_db.name)
+            and
+            self.has_immutable_field(payload=service_data)
+        ):
+            immutable_fields: str = ", ".join(sorted(self.IMMUTABLE_FIELDS.intersection(service_data)))
+
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
                     "status": "403 - Forbidden",
-                    "message": f"Default core service [{service_db.name}] cannot be modified."
+                    "message": f"Default core service [{service_db.name}] cannot modify immutable field(s): {immutable_fields}."
                 }
             )
 

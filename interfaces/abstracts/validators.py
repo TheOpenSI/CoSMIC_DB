@@ -6,8 +6,14 @@ from abc import (
 
 
 ### Type hints ###
-from collections.abc import Sequence
-from typing import ClassVar
+from collections.abc import (
+    Mapping,
+    Sequence
+)
+from typing import (
+    Any,
+    ClassVar
+)
 
 
 ### Internal modules ###
@@ -17,7 +23,8 @@ from ...libraries.l337.base import ImmutableFieldMatcher
 class ImmutableFieldValidator(ABC):
     """Abstract validator for immutable/reserved field values."""
 
-    RESERVED_VALUES: ClassVar[frozenset[str]] = frozenset()
+    RESERVED_VALUES:    ClassVar[frozenset[str]] = frozenset()
+    IMMUTABLE_FIELDS:   ClassVar[frozenset[str]] = frozenset()
 
     def __init__(
         self,
@@ -25,6 +32,22 @@ class ImmutableFieldValidator(ABC):
     ) -> None:
         self._reserved: tuple[str, ...] = tuple(type(self).RESERVED_VALUES)
         self._matchers: tuple[ImmutableFieldMatcher, ...] = tuple(matchers)
+
+    @classmethod
+    def has_immutable_field(
+        cls,
+        payload: Mapping[str, Any]
+    ) -> bool:
+        """Return True when the payload touches an immutable field."""
+        return bool(cls.IMMUTABLE_FIELDS.intersection(payload))
+
+    @classmethod
+    def is_reserved_value(
+        cls,
+        value: str
+    ) -> bool:
+        """Return True when `value` is exactly one of the reserved values."""
+        return value.lower() in cls.RESERVED_VALUES
 
     def find_mimicked_value(
         self,

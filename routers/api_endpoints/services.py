@@ -116,7 +116,7 @@ async def create_service_v1(
     ).first()
 
     if service_name_uniqueness:
-        if service_name_uniqueness in ServiceImmutableFieldValidator.RESERVED_VALUES:
+        if ServiceImmutableFieldValidator.is_reserved_value(service_name_uniqueness):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
@@ -195,12 +195,16 @@ async def update_service_v1(
         Depends(ServiceImmutableFieldValidator)
     ]
 ) -> Any:
-    # Reject any modification up front since default core services are immutable
-    service_db: Services = immutable_field_validator.validate_immutable_target(service_id=service_id)
-
     service_data: dict[str, Any] = service.model_dump(
         mode="json",
         exclude_unset=True
+    )
+
+    # Default core services cannot change their immutable fields, while every
+    # other field remains updatable
+    service_db: Services = immutable_field_validator.validate_immutable_target(
+        service_id=service_id,
+        service_data=service_data
     )
 
     # Empty payload validation
@@ -213,7 +217,8 @@ async def update_service_v1(
             }
         )
 
-    # Default core services name cannot be modified/renamed at application level
+    # Non-core services may be renamed, as long as the new name does not mimic
+    # a reserved core service name
     if "name" in service_data:
         service_name: str = service_data["name"]
 
@@ -281,22 +286,7 @@ async def update_service_v1(
     path="/{service_id}",
     status_code=status.HTTP_200_OK,
     response_model=ServiceDeleteResponse,
-    responses={
-        **OPENAPI_DELETE_EXTRA_RESPONSES,
-        403: {
-            "description": "Delete Active Service Denied",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "status": "403 - Forbidden",
-                            "message": "string"
-                        }
-                    }
-                }
-            }
-        }
-    }
+    responses={**OPENAPI_DELETE_EXTRA_RESPONSES}
 )
 async def delete_service_v1(
     service_id: PositiveInt,
@@ -314,6 +304,16 @@ async def delete_service_v1(
         )
 
     else:
+        # Default core services are seeded once on a fresh run and stay forever
+        if ServiceImmutableFieldValidator.is_reserved_value(service_gone.name):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "status": "403 - Forbidden",
+                    "message": f"Default core service [{service_gone.name}] cannot be deleted."
+                }
+            )
+
         if service_gone.status != False:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

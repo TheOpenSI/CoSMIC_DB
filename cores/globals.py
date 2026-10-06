@@ -88,7 +88,20 @@ OPENAPI_PATCH_EXTRA_RESPONSES: dict[int | str, dict[str, Any]] = {
 
 
 OPENAPI_DELETE_EXTRA_RESPONSES: dict[int | str, dict[str, Any]] = {
-    **OPENAPI_GET_EXTRA_RESPONSES
+    **OPENAPI_GET_EXTRA_RESPONSES,
+    403: {
+        "description": "Delete Active Or Default Core Service Denied",
+        "content": {
+            "application/json": {
+                "example": {
+                    "detail": {
+                        "status": "403 - Forbidden",
+                        "message": "string"
+                    }
+                }
+            }
+        }
+    }
 }
 
 
