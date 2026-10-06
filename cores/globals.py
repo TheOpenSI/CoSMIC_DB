@@ -13,9 +13,12 @@ from typing import Any
 
 
 
-USER_ROLE:      str             = 'user'
-LLM_ROLE:       str             = 'assistant'
-SYSTEM_ROLES:   tuple[str, ...] = ("admin", "user")
+USER_ROLE: str = 'user'
+LLM_ROLE: str = 'assistant'
+SYSTEM_ROLES: tuple[str, ...] = (
+    "admin",
+    "user"
+)
 
 
 OPENAPI_GET_EXTRA_RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -33,6 +36,7 @@ OPENAPI_GET_EXTRA_RESPONSES: dict[int | str, dict[str, Any]] = {
         }
     }
 }
+
 
 OPENAPI_POST_EXTRA_RESPONSES: dict[int | str, dict[str, Any]] = {
     400: {
@@ -63,13 +67,41 @@ OPENAPI_POST_EXTRA_RESPONSES: dict[int | str, dict[str, Any]] = {
     }
 }
 
+
 OPENAPI_PATCH_EXTRA_RESPONSES: dict[int | str, dict[str, Any]] = {
     **OPENAPI_GET_EXTRA_RESPONSES,
-    **OPENAPI_POST_EXTRA_RESPONSES
+    **OPENAPI_POST_EXTRA_RESPONSES,
+    403: {
+        "description": "Immutable Fields Modification Denied",
+        "content": {
+            "application/json": {
+                "example": {
+                    "detail": {
+                        "status": "403 - Forbidden",
+                        "message": "string"
+                    }
+                }
+            }
+        }
+    }
 }
 
+
 OPENAPI_DELETE_EXTRA_RESPONSES: dict[int | str, dict[str, Any]] = {
-    **OPENAPI_GET_EXTRA_RESPONSES
+    **OPENAPI_GET_EXTRA_RESPONSES,
+    403: {
+        "description": "Delete Active Or Default Core Service Denied",
+        "content": {
+            "application/json": {
+                "example": {
+                    "detail": {
+                        "status": "403 - Forbidden",
+                        "message": "string"
+                    }
+                }
+            }
+        }
+    }
 }
 
 

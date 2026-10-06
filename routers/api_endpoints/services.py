@@ -1,27 +1,33 @@
 ### Core modules ###
 from fastapi import (
     APIRouter,
+    Depends,
     HTTPException,
     Query,
     status
 )
-from sqlmodel import (
-    func,
-    select
-)
+from sqlmodel import select
 
 
 ### Type hints ###
+from collections.abc import Sequence
+from pydantic.types import PositiveInt
+from sqlalchemy.exc import IntegrityError
 from sqlmodel.sql.expression import SelectOfScalar
+from ...types.tags import APITag
 from typing import (
     Annotated,
-    Any,
-    Sequence
+    Any
 )
-from ...types.tags import APITag
-from pydantic.types import PositiveInt
+
 
 ### Internal modules ###
+from ...apis.table_models.services import Services
+from ...apis.data_models.services import (
+    # For validation (Data Model)
+    ServiceCreate,
+    ServiceUpdate
+)
 from ...cores.db import SessionDependency
 from ...cores.globals import (
     OPENAPI_GET_EXTRA_RESPONSES,
@@ -29,12 +35,7 @@ from ...cores.globals import (
     OPENAPI_PATCH_EXTRA_RESPONSES,
     OPENAPI_DELETE_EXTRA_RESPONSES
 )
-from ...apis.table_models.services import Services
-from ...apis.data_models.services import (
-    # For validation (Data Model)
-    ServiceCreate,
-    ServiceUpdate
-)
+from ...interfaces.apis.services import ServiceImmutableFieldValidator
 from ...types.api_responses.services import (
     # For client responses (Responses Model)
     ServicesPublicResponse,
@@ -98,39 +99,51 @@ async def read_services_v1(
 )
 async def create_service_v1(
     service: ServiceCreate,
-    session: SessionDependency
+    session: SessionDependency,
+    immutable_field_validator: Annotated[
+        ServiceImmutableFieldValidator,
+        Depends(ServiceImmutableFieldValidator)
+    ]
 ) -> Any:
     # Validation against 'name' field in payload
-    service_stored_name: tuple[int, str] | None = session.exec(
+    service_name_uniqueness: str | None = session.exec(
         statement=select(
-            Services.id, # pyright: ignore
             Services.name
         )
         .where(
-            func.lower(
-                Services.name
-            ).like(
-                other=func.lower(service.name),
-                escape=None
-            )
+            Services.name.ilike(service.name)
         )
     ).first()
 
-    if service_stored_name:
+    if service_name_uniqueness:
+        if ServiceImmutableFieldValidator.is_reserved_value(service_name_uniqueness):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "status": "409 - Conflict",
+                    "message": f"Default core service [{service_name_uniqueness}] has been reserved."
+                }
+            )
+
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "status": "409 - Conflict",
-                "message": f"'{service.name}' service with same name already exists."
-                }
-            )
+                "message": f"A service with the name [{service_name_uniqueness}] already exists."
+            }
+        )
 
+    # Reject names mimicking a reserved core service (injection attempts)
+    immutable_field_validator.validate_reserved_value(service.name)
 
     # Only perform INSERT query if payload actually contains new data
     service_db: Services = Services.model_validate(
         obj=service,
         strict=True
     )
+
+    # Prefer service name to get stored in lowercase per db convention
+    service_db.name = service_db.name.lower()
 
     session.add(instance=service_db)
     session.commit()
@@ -176,33 +189,77 @@ async def read_service_v1(
 async def update_service_v1(
     service_id: PositiveInt,
     service: ServiceUpdate,
-    session: SessionDependency
+    session: SessionDependency,
+    immutable_field_validator: Annotated[
+        ServiceImmutableFieldValidator,
+        Depends(ServiceImmutableFieldValidator)
+    ]
 ) -> Any:
-    service_db: Services | None = session.get(entity=Services, ident=service_id)
+    service_data: dict[str, Any] = service.model_dump(
+        mode="json",
+        exclude_unset=True
+    )
 
-    if service_db is None:
+    # Default core services cannot change their immutable fields, while every
+    # other field remains updatable
+    service_db: Services = immutable_field_validator.validate_immutable_target(
+        service_id=service_id,
+        service_data=service_data
+    )
+
+    # Empty payload validation
+    if not service_data:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Service Not Found!"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "400 - Bad Request",
+                "message": "Incoming data cannot be empty."
+            }
         )
 
-    else:
-        service_data: dict[str, Any] = service.model_dump(
-            mode="python",
-            exclude_unset=True
-        )
+    # Non-core services may be renamed, as long as the new name does not mimic
+    # a reserved core service name
+    if "name" in service_data:
+        service_name: str = service_data["name"]
 
-        # NOTE:
-        # This's a wrapped method provided by SQLModel module so we can simply
-        # "update" stored service data with new one without having to think of
-        # the logic behind it. I couldn't find an actual reference to this
-        # method from the module itself (not surprised much since its part of
-        # FastAPI) so that I can understand the usecase of it better. However,
-        # these 2 sources below are my best attempt to justify the usage here:
-        # 1. https://sqlmodel.tiangolo.com/tutorial/fastapi/update/#update-the-hero-in-the-database
-        # 2. https://deepwiki.com/fastapi/sqlmodel/3-database-operations#partial-updates-with-multiple-models
+        # Reject names mimicking a reserved core service (injection attempts)
+        immutable_field_validator.validate_reserved_value(candidate=service_name)
 
-        # Only perform UPDATE queries if incoming data differ from stored data
+        if service_name.lower() == service_db.name.lower():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "400 - Bad Request",
+                    "message": f"Incoming service name [{service_name}] matched current service name [{service_db.name}]."
+                }
+            )
+
+        # Prefer service name to get stored in lowercase per db convention
+        service_name = service_name.lower()
+
+        service_name_uniqueness: str | None = session.exec(
+            statement=select(
+                Services.name
+            )
+            .where(
+                Services.name.ilike(service_name),
+                Services.id != service_id
+            )
+        ).first()
+
+        if service_name_uniqueness:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "status": "409 - Conflict",
+                    "message": f"A service with the name [{service_name_uniqueness}] already exists."
+                }
+            )
+
+        service_data["name"] = service_name
+
+    # Only perform UPDATE query if payload actually contains new data
+    try:
         service_db.sqlmodel_update(obj=service_data)
 
         session.add(instance=service_db)
@@ -214,27 +271,22 @@ async def update_service_v1(
             "updated": service_db
         }
 
+    except IntegrityError as sqlalchemy_exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "status": "409 - Conflict",
+                "message": f"{sqlalchemy_exc}"
+            }
+        )
+
 
 @services_v1_router.delete(
     path="/{service_id}",
     status_code=status.HTTP_200_OK,
     response_model=ServiceDeleteResponse,
-    responses={
-        **OPENAPI_DELETE_EXTRA_RESPONSES,
-        403: {
-            "description": "Delete Active Service Denied",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "status": "403 - Forbidden",
-                            "message": "string"
-                        }
-                    }
-                }
-            }
-        }
-    }
+    responses={**OPENAPI_DELETE_EXTRA_RESPONSES}
 )
 async def delete_service_v1(
     service_id: PositiveInt,
@@ -252,6 +304,16 @@ async def delete_service_v1(
         )
 
     else:
+        # Default core services are seeded once on a fresh run and stay forever
+        if ServiceImmutableFieldValidator.is_reserved_value(service_gone.name):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "status": "403 - Forbidden",
+                    "message": f"Default core service [{service_gone.name}] cannot be deleted."
+                }
+            )
+
         if service_gone.status != False:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

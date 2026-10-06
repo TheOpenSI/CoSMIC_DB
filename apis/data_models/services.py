@@ -34,8 +34,8 @@ class ServiceUpdate(ServiceBase):
 
     name:               str | None  = None      # pyright: ignore
     desc:               str | None  = None
-    status:             bool | None = True      # pyright: ignore
-    memory_capability:  bool | None = False     # pyright: ignore
+    status:             bool | None = None      # pyright: ignore
+    memory_capability:  bool | None = None      # pyright: ignore
 
 
 class ServiceDelete(ServiceBase):
