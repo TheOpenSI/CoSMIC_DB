@@ -63,7 +63,10 @@ class KeycloakProvider(OAuthProvider):
         payload = resp.json()
         access_token = payload.get("access_token")
         if not access_token:
-            raise HTTPException(status_code=502, detail="No access token returned")
+            raise HTTPException(
+                status_code=502,
+                detail="No access token returned",
+            )
 
         return TokenBundle(
             access_token=access_token,
@@ -131,7 +134,10 @@ class KeycloakProvider(OAuthProvider):
         payload = resp.json()
         access_token = payload.get("access_token")
         if not access_token:
-            raise HTTPException(status_code=502, detail="No access token returned")
+            raise HTTPException(
+                status_code=502,
+                detail="No access token returned",
+            )
 
         return TokenBundle(
             access_token=access_token,

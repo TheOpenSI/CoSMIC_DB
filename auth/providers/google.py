@@ -23,7 +23,10 @@ class GoogleProvider(OAuthProvider):
 
     def authorize_url(self, state: str, redirect_uri: str) -> str:
         if not config.GOOGLE_CLIENT_ID:
-            raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_ID not configured")
+            raise HTTPException(
+                status_code=500,
+                detail="GOOGLE_CLIENT_ID not configured",
+            )
 
         params = {
             "client_id": config.GOOGLE_CLIENT_ID,
@@ -38,7 +41,10 @@ class GoogleProvider(OAuthProvider):
 
     async def exchange_code(self, code: str, redirect_uri: str) -> TokenBundle:
         if not config.GOOGLE_CLIENT_ID or not config.GOOGLE_CLIENT_SECRET:
-            raise HTTPException(status_code=500, detail="Google OAuth not configured")
+            raise HTTPException(
+                status_code=500,
+                detail="Google OAuth not configured",
+            )
 
         data = {
             "grant_type": "authorization_code",
@@ -51,7 +57,10 @@ class GoogleProvider(OAuthProvider):
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.post(config.GOOGLE_TOKEN_URL, data=data)
         except httpx.HTTPError as e:
-            raise HTTPException(status_code=502, detail=f"Google token exchange failed: {e}")
+            raise HTTPException(
+                status_code=502,
+                detail=f"Google token exchange failed: {e}",
+            )
 
         if resp.status_code != 200:
             raise HTTPException(
@@ -79,7 +88,10 @@ class GoogleProvider(OAuthProvider):
 
     def normalize_claims(self, tokens: TokenBundle) -> NormalizedClaims:
         if not tokens.id_token:
-            raise HTTPException(status_code=502, detail="Missing Google id_token")
+            raise HTTPException(
+                status_code=502,
+                detail="Missing Google id_token",
+            )
 
         signing_key = _get_jwks().get_signing_key_from_jwt(tokens.id_token)
         claims = jwt.decode(
@@ -99,7 +111,6 @@ class GoogleProvider(OAuthProvider):
         )
 
     async def logout(self, refresh_token: str | None) -> None:
-        # Optional: revoke at Google. Clearing Cosmic cookies is enough for now.
         if not refresh_token:
             return
         try:
@@ -125,11 +136,17 @@ class GoogleProvider(OAuthProvider):
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(token_url, data=data)
         if resp.status_code != 200:
-            raise HTTPException(status_code=401, detail=f"Google token refresh failed: {resp.text}")
+            raise HTTPException(
+                status_code=401,
+                detail=f"Google token refresh failed: {resp.text}",
+            )
         payload = resp.json()
         access_token = payload.get("access_token")
         if not access_token:
-            raise HTTPException(status_code=502, detail="No access token returned")
+            raise HTTPException(
+                status_code=502,
+                detail="No access token returned",
+            )
         return TokenBundle(
             access_token=access_token,
             refresh_token=payload.get("refresh_token") or refresh_token,
