@@ -21,7 +21,6 @@ def _cookie_kwargs(max_age: int | None = None) -> dict:
         kwargs["max_age"] = max_age
     return kwargs
 
-
 def issue_session_token(
     claims: NormalizedClaims,
     user_id: UUID,
@@ -41,7 +40,6 @@ def issue_session_token(
     }
     return jwt.encode(payload, config.SESSION_SECRET, algorithm="HS256")
 
-
 def set_session_cookie(
     response: Response,
     claims: NormalizedClaims,
@@ -55,8 +53,6 @@ def set_session_cookie(
         token,
         **_cookie_kwargs(max(remaining, 0)),
     )
-
-
 
 def read_session(request: Request) -> dict:
     """Decode + verify Cosmic session cookie. Raises 401 if missing/invalid."""
@@ -103,8 +99,11 @@ def clear_auth_cookies(response: Response) -> None:
     response.delete_cookie(config.OAUTH_PROVIDER_COOKIE, path="/")
     response.delete_cookie(config.OAUTH_STATE_COOKIE, path="/")
 
-
 def unauthorized_cleared(detail: str = "User no longer exists") -> JSONResponse:
     response = JSONResponse(status_code=401, content={"detail": detail})
     clear_auth_cookies(response)
     return response
+
+
+
+
