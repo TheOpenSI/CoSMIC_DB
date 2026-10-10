@@ -4,11 +4,11 @@ from datetime import (
     timezone
 )
 from uuid import uuid7
-from fastapi import HTTPException
-from sqlmodel import (
-    Session,
-    select
+from fastapi import (
+    HTTPException,
+    status
 )
+from sqlmodel import select
 
 
 ### Type hints ###
@@ -21,16 +21,20 @@ from .models import (
     UserIdentities,
     Users
 )
+from app.cores.db import SessionDependency
 
 
 def ensure_user(
-    session: Session,
-    claims: NormalisedClaims
+    session:    SessionDependency,
+    claims:     NormalisedClaims
 ) -> Users:
     if not claims.sub:
         raise HTTPException(
-            status_code=400,
-            detail="Login requires a stable subject (sub)"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "400 - Bad Request",
+                "message": "Login requires a stable subject (sub)."
+            }
         )
 
     identity: UserIdentities | None = session.exec(
@@ -41,20 +45,29 @@ def ensure_user(
     ).first()
 
     if identity:
-        user: Users | None = session.get(Users, identity.user_id)
+        user: Users | None = session.get(
+            entity=Users,
+            ident=identity.user_id
+        )
 
         if user is None:
             raise HTTPException(
-                status_code=500,
-                detail="Identity points at missing user"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "status": "500 - Internal Server Error",
+                    "message": "Identity points at missing user."
+                }
             )
 
         return user
 
     if not claims.email:
         raise HTTPException(
-            status_code=400,
-            detail="Login requires an email claim from the identity provider",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "400 - Bad Request",
+                "message": "Login requires an email claim from the IdP."
+            }
         )
 
     email: str = claims.email.strip().lower()
@@ -74,16 +87,23 @@ def ensure_user(
 
         if default_role is None:
             raise HTTPException(
-                status_code=500,
-                detail="Default 'user' role not found"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "status": "500 - Internal Server Error",
+                    "message": "Default 'user' role not found."
+                }
             )
 
         user = Users(
             id=uuid7(),
             role_id=default_role.id,
-            name=claims.name or email,
+            name=(
+                claims.name
+                or
+                email
+            ),
             email=email,
-            create_on=datetime.now(timezone.utc)
+            create_on=datetime.now(tz=timezone.utc)
         )
 
         session.add(user)
@@ -95,7 +115,7 @@ def ensure_user(
             user_id=user.id,
             provider=claims.provider,
             sub=claims.sub,
-            created_on=datetime.now(timezone.utc)
+            created_on=datetime.now(tz=timezone.utc)
         )
     )
 

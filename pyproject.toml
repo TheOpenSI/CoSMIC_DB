@@ -10,25 +10,13 @@ dependencies = [
     # NOTE: Use 'psycopg[binary]' version on production.
     "psycopg>=3.3.3",
     "sqlmodel>=0.0.37",
-    # NOTE: OAuth 2.0 / OpenID Connect client for the Auth BFF (replaces the
-    # hand-rolled Keycloak/Google/Azure adapters and PyJWT).
     "authlib>=1.8.0",
-    # NOTE: Authlib's Starlette/FastAPI web client uses httpx2 as its transport.
     "httpx2>=2.13.1",
     # NOTE: Required by Starlette's SessionMiddleware, which Authlib uses to
     # keep the temporary OAuth state/nonce.
     "itsdangerous>=2.2.0",
     # NOTE: Used to detect near-miss (e.g. L337) immutable field value mimicry.
-    "rapidfuzz>=3.14.5",
-]
-
-
-[dependency-groups]
-dev = [
-    "faker>=37.0.0",
-    "httpx>=0.28.0",
-    "pytest>=8.4.0",
-    "pytest-asyncio>=1.0.0",
+    "rapidfuzz>=3.14.5"
 ]
 
 
@@ -115,8 +103,3 @@ prepend_sys_path = [
 # type = "exec"
 # executable = "ruff"
 # options = "check --fix REVISION_SCRIPT_FILENAME"
-
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]

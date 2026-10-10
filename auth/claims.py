@@ -20,34 +20,49 @@ class NormalisedClaims:
     sub:        str
     email:      str | None  = None
     name:       str | None  = None
-    roles:      list[str]   = field(default_factory=list)
+    roles:      list[str]   = field(default_factory=list[str])
 
 
-def keycloak_userinfo_to_claims(userinfo: dict[str, Any]) -> NormalisedClaims:
+def keycloak_user_info_to_claims(user_info: dict[str, Any]) -> NormalisedClaims:
     """
-    Map Keycloak's OIDC userinfo onto :class:`NormalisedClaims`.
+    Map Keycloak's OIDC user info onto :class:`NormalisedClaims`.
 
-    Roles are read from Keycloak's `realm_access.roles` claim. Google and
-    Microsoft logins arrive through Keycloak identity brokering, so they are
-    normalised here exactly like a native Keycloak login.
+    Roles are read from Keycloak's `realm_access.roles` claim. Google & Microsoft
+    logins arrive through Keycloak identity brokering, so they are normalised here
+    exactly like a native Keycloak login.
     """
-    realm_access: dict[str, Any] = userinfo.get("realm_access") or {}
+    realm_access: dict[str, Any] = user_info.get("realm_access") or {}
     roles: list[str] = (
         list(realm_access.get("roles") or [])
-        if   (isinstance(realm_access, dict))
+        if   (realm_access)
         else ([])
     )
 
     return NormalisedClaims(
         provider="keycloak",
-        sub=str(userinfo.get("sub") or ""),
-        email=userinfo.get("email"),
+        sub=user_info.get(
+            "sub",
+            ""
+        ),
+        email=user_info.get(
+            "email",
+            None
+        ),
         name=(
-            userinfo.get("name")
+            user_info.get(
+                "name",
+                None
+            )
             or
-            userinfo.get("preferred_username")
+            user_info.get(
+                "preferred_username",
+                None
+            )
             or
-            userinfo.get("email")
+            user_info.get(
+                "email",
+                None
+            )
         ),
         roles=roles
     )
