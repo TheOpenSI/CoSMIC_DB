@@ -28,6 +28,46 @@
       { "name": "user" }
     ]
   },
+  "identityProviders": [
+    {
+      "alias": "google",
+      "displayName": "Google",
+      "providerId": "google",
+      "enabled": true,
+      "trustEmail": true,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "authenticateByDefault": false,
+      "linkOnly": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "clientId": "${KEYCLOAK_GOOGLE_CLIENT_ID}",
+        "clientSecret": "${KEYCLOAK_GOOGLE_CLIENT_SECRET}",
+        "defaultScope": "openid profile email",
+        "syncMode": "IMPORT",
+        "useJwksUrl": "true"
+      }
+    },
+    {
+      "alias": "microsoft",
+      "displayName": "Microsoft",
+      "providerId": "microsoft",
+      "enabled": true,
+      "trustEmail": true,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "authenticateByDefault": false,
+      "linkOnly": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "clientId": "${KEYCLOAK_MICROSOFT_CLIENT_ID}",
+        "clientSecret": "${KEYCLOAK_MICROSOFT_CLIENT_SECRET}",
+        "tenantId": "${KEYCLOAK_MICROSOFT_TENANT_ID}",
+        "defaultScope": "openid profile email",
+        "syncMode": "IMPORT"
+      }
+    }
+  ],
   "clients": [
     {
       "clientId": "cosmic-fastapi-keycloak",
@@ -37,6 +77,10 @@
       "clientAuthenticatorType": "client-secret",
       "secret": "${KEYCLOAK_CLIENT_SECRET}",
       "redirectUris": ["http://localhost:8081/api/v1/auth/callback/keycloak"],
+      "postLogoutRedirectUris": [
+        "http://localhost:5173/*",
+        "http://localhost:8081/*"
+      ],
       "webOrigins": ["http://localhost:5173", "http://localhost:8081"],
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
