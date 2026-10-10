@@ -45,21 +45,29 @@ def cookie_kwargs(max_age: int | None = None) -> dict[str, bool | str | int]:
 
 def issue_session_token(
     claims: NormalisedClaims,
-    user_id: UUID7
+    user_id: UUID7,
+    refresh_token: str | None = None
 ) -> str:
-    """Build a Cosmic session JWT (RS256) from normalized IdP claims."""
+    """
+    Build a Cosmic session JWT (RS256) from normalized IdP claims.
+
+    The Keycloak refresh token rides along as a claim so the whole session is a
+    single HttpOnly cookie: `/refresh` and `/logout` read the (possibly expired)
+    JWT and pull the refresh token back out of it.
+    """
     now: datetime = datetime.now(timezone.utc)
 
     payload: dict[str, str | list[str] | datetime | None] = {
-        "iss":      config.SESSION_ISSUER,
-        "sub":      claims.sub,
-        "email":    claims.email,
-        "name":     claims.name,
-        "roles":    claims.roles,
-        "provider": claims.provider,
-        "user_id":  str(user_id),
-        "iat":      now,
-        "exp":      now + timedelta(seconds=config.SESSION_MAX_AGE)
+        "iss":           config.SESSION_ISSUER,
+        "sub":           claims.sub,
+        "email":         claims.email,
+        "name":          claims.name,
+        "roles":         claims.roles,
+        "provider":      claims.provider,
+        "user_id":       str(user_id),
+        "refresh_token": refresh_token,
+        "iat":           now,
+        "exp":           now + timedelta(seconds=config.SESSION_MAX_AGE)
     }
 
     header: dict[str, str] = {
@@ -78,17 +86,26 @@ def issue_session_token(
 def set_session_cookie(
     response: Response,
     claims: NormalisedClaims,
-    user_id: UUID7
-)-> None:
+    user_id: UUID7,
+    refresh_token: str | None = None,
+    max_age: int | None = None
+) -> None:
+    """
+    Set the single Cosmic session cookie.
+
+    ``max_age`` should be the IdP refresh-token lifespan so the (expired) JWT is
+    still delivered to `/refresh`. It defaults to the configured refresh window.
+    """
     token: str = issue_session_token(
         claims=claims,
-        user_id=user_id
+        user_id=user_id,
+        refresh_token=refresh_token
     )
 
     response.set_cookie(
         config.SESSION_COOKIE_NAME,
         token,
-        **cookie_kwargs(config.REFRESH_COOKIE_MAX_AGE),
+        **cookie_kwargs(max_age or config.REFRESH_TOKEN_MAX_AGE),
     )
 
 
@@ -162,9 +179,9 @@ def read_session_allowed_expired(request: Request) -> dict[str, str | list[str] 
     """
     Read the session even when the access token has expired.
 
-    Only used by ``POST /refresh`` since Google-style IdPs omit identity details
-    from the refresh response, so the (signature-verified) expired session is the
-    only place those claims are still available.
+    Only used by ``POST /refresh`` and ``POST /logout``: the signature is still
+    verified, but the expired JWT is the only place the Keycloak refresh token
+    is still available.
     """
     return _read_token_claims(
         request=request,
@@ -175,22 +192,6 @@ def read_session_allowed_expired(request: Request) -> dict[str, str | list[str] 
 def clear_auth_cookies(response: Response) -> None:
     response.delete_cookie(
         key=config.SESSION_COOKIE_NAME,
-        path="/"
-    )
-    response.delete_cookie(
-        key=config.ACCESS_TOKEN_COOKIE,
-        path="/"
-    )
-    response.delete_cookie(
-        key=config.REFRESH_TOKEN_COOKIE,
-        path="/"
-    )
-    response.delete_cookie(
-        key=config.OAUTH_PROVIDER_COOKIE,
-        path="/"
-    )
-    response.delete_cookie(
-        key=config.OAUTH_STATE_COOKIE,
         path="/"
     )
     response.delete_cookie(

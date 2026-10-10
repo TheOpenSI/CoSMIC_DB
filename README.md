@@ -365,12 +365,14 @@ keypair, so the other microservices can verify it with the public key only.
 
 - Generate the keypair with `.\bins\gen_session_keys.ps1` or `./bins/gen_session_keys.sh`. It writes `auth/secrets/session_private.pem` and `auth/secrets/session_public.pem` (gitignored).
 - The public half is published at `http://localhost:8081/api/v1/auth/jwks.json` for the other services.
+- `cosmic_session` is the **only** application cookie: the Keycloak refresh token travels inside it as a claim, so `/refresh` and `/logout` need no separate token cookie.
 - `SESSION_SECRET` is now only used to sign the temporary Authlib OAuth state/nonce cookie. It is separate from the RS256 keypair.
 
 ```txt
 SESSION_SECRET=<your-unique-session-secret>
 SESSION_COOKIE_NAME=cosmic_session
 SESSION_MAX_AGE=900
+REFRESH_TOKEN_MAX_AGE=86400
 OAUTH_SESSION_COOKIE=cosmic_oauth_session
 ```
 

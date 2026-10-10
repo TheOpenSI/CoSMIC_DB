@@ -195,42 +195,14 @@ async def callback_provider(
         status_code=status.HTTP_302_FOUND
     )
 
-    refresh_max_age: int = (
-        tokens.get("refresh_expires_in")
-        or
-        config.REFRESH_COOKIE_MAX_AGE
-    )
-
-    response.set_cookie(
-        key=config.OAUTH_PROVIDER_COOKIE,
-        value="keycloak",
-        max_age=refresh_max_age,
-        **cosmic_session.cookie_kwargs(),
-    )
-
-    # Cosmic session (source of truth for /me)
+    # Cosmic session is the single source of truth for /me, /refresh and /logout.
+    # The Keycloak refresh token travels inside the JWT.
     cosmic_session.set_session_cookie(
         response=response,
         claims=claims,
-        user_id=user.id
-    )
-
-    # Keep the refresh token for Keycloak session revocation on logout.
-    if tokens.get("refresh_token"):
-        response.set_cookie(
-            key=config.REFRESH_TOKEN_COOKIE,
-            value=tokens["refresh_token"],
-            max_age=refresh_max_age,
-            **cosmic_session.cookie_kwargs(),
-        )
-    # Stop treating the IdP access_token as the app session.
-    response.delete_cookie(
-        key=config.ACCESS_TOKEN_COOKIE,
-        path="/"
-    )
-    response.delete_cookie(
-        key=config.OAUTH_STATE_COOKIE,
-        path="/"
+        user_id=user.id,
+        refresh_token=tokens.get("refresh_token"),
+        max_age=tokens.get("refresh_expires_in")
     )
 
     return response
@@ -241,7 +213,17 @@ async def callback_provider(
     status_code=status.HTTP_200_OK
 )
 async def logout(request: Request) -> RedirectResponse:
-    refresh_token: str | None = request.cookies.get(config.REFRESH_TOKEN_COOKIE)
+    refresh_token: str | None = None
+
+    try:
+        old: dict[str, str | list[str] | None] = (
+            cosmic_session.read_session_allowed_expired(request=request)
+        )
+        stored_refresh: str | list[str] | None = old.get("refresh_token")
+        refresh_token = stored_refresh if isinstance(stored_refresh, str) else None
+
+    except HTTPException:
+        refresh_token = None
 
     if refresh_token:
         try:
@@ -278,15 +260,20 @@ async def refresh(
     request: Request,
     session: SessionDependency
 ) -> JSONResponse:
-    refresh_token: str | None = request.cookies.get(config.REFRESH_TOKEN_COOKIE)
+    old: dict[str, str | list[str] | None] = (
+        cosmic_session.read_session_allowed_expired(request=request)
+    )
+
+    stored_refresh: str | list[str] | None = old.get("refresh_token")
+    refresh_token: str | None = (
+        stored_refresh if isinstance(stored_refresh, str) else None
+    )
 
     if not refresh_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No refresh token found"
+            detail="No refresh token in session"
         )
-
-    old: dict[str, str | list[str] | None] = cosmic_session.read_session_allowed_expired(request=request)
 
     user_id: UUID = UUID(str(old["user_id"]))
 
@@ -329,34 +316,16 @@ async def refresh(
             roles=old.get("roles") or [],
         )
 
+    new_refresh: str | None = tokens.get("refresh_token") or refresh_token
+
     response: JSONResponse = JSONResponse({"ok": True})
     cosmic_session.set_session_cookie(
         response=response,
         claims=claims,
-        user_id=user_id
+        user_id=user_id,
+        refresh_token=new_refresh,
+        max_age=tokens.get("refresh_expires_in")
     )
-
-    new_refresh: str | None = tokens.get("refresh_token")
-
-    if (
-        new_refresh
-        and
-        new_refresh != refresh_token
-    ):
-        refresh_max_age: int = tokens.get("refresh_expires_in") or config.REFRESH_COOKIE_MAX_AGE
-
-        response.set_cookie(
-            key=config.REFRESH_TOKEN_COOKIE,
-            value=new_refresh,
-            max_age=refresh_max_age,
-            **cosmic_session.cookie_kwargs()
-        )
-        response.set_cookie(
-            config.OAUTH_PROVIDER_COOKIE,
-            "keycloak",
-            max_age=refresh_max_age,
-            **cosmic_session.cookie_kwargs()
-        )
 
     return response
 

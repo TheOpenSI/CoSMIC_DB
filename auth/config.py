@@ -35,7 +35,13 @@ SESSION_COOKIE_NAME: str = (
     or "cosmic_session"
 )
 SESSION_MAX_AGE: int = int(cosmic_auth_configs.get("SESSION_MAX_AGE") or "900")
-REFRESH_COOKIE_MAX_AGE: int = int(cosmic_auth_configs.get("REFRESH_COOKIE_MAX_AGE") or "86400")
+# How long the session cookie persists so that `/refresh` can still read the (by
+# then expired) JWT. Falls back to the legacy env key for existing deployments.
+REFRESH_TOKEN_MAX_AGE: int = int(
+    cosmic_auth_configs.get("REFRESH_TOKEN_MAX_AGE")
+    or cosmic_auth_configs.get("REFRESH_COOKIE_MAX_AGE")
+    or "86400"
+)
 SESSION_ISSUER: str = cosmic_auth_configs.get("SESSION_ISSUER") or "cosmic-auth"
 
 # Static RSA keypair used to sign/verify the Cosmic session cookie. The private
@@ -61,13 +67,6 @@ OAUTH_SESSION_COOKIE: str = (
     cosmic_auth_configs.get("OAUTH_SESSION_COOKIE")
     or "cosmic_oauth_session"
 )
-
-# Legacy cookies. Names are kept so we can clear them for one release after the
-# migration to Authlib + RS256.
-ACCESS_TOKEN_COOKIE: str = "cosmic_access_token"
-REFRESH_TOKEN_COOKIE: str = "cosmic_refresh_token"
-OAUTH_STATE_COOKIE: str = "cosmic_oauth_state"
-OAUTH_PROVIDER_COOKIE: str = "cosmic_oauth_provider"
 
 # ── Keycloak ────────────────────────────────────────────────────────────────
 KEYCLOAK_INTERNAL_URL: str = (
