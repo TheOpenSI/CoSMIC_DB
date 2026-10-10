@@ -97,7 +97,7 @@ services:
         mode: host
     networks:
         - cosmic-backend
-    
+
   keycloak:
     container_name: cosmic-keycloak
     image: quay.io/keycloak/keycloak:26.0
@@ -168,6 +168,7 @@ services:
         mode: host
     networks:
       - cosmic-backend
+
   fastapi_keycloak:
     container_name: cosmic-fastapi-keycloak
     restart: unless-stopped

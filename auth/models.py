@@ -14,9 +14,22 @@ so the shared ``Users`` mapper can resolve, keeping the model definitions
 themselves untouched (and compatible with the main `cosmic-db` backend).
 """
 
+### Core modules ###
+
+
+### Type hints ###
+
+
+### Internal modules ###
 from app.apis.table_models.chatboxes import Chatboxes  # noqa: F401
 from app.apis.table_models.roles import Roles  # noqa: F401
 from app.apis.table_models.user_identities import UserIdentities  # noqa: F401
 from app.apis.table_models.users import Users  # noqa: F401
 
-__all__ = ["Chatboxes", "Roles", "UserIdentities", "Users"]
+
+__all__: list[str] = [
+    "Chatboxes",
+    "Roles",
+    "UserIdentities",
+    "Users"
+]

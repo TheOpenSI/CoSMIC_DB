@@ -28,7 +28,6 @@ COSMIC-DB/
 │   ├── api_endpoints/      # Requests to CoSMIC BE's API endpoints goes here
 │   └── normal_endpoints/   # Requests to CoSMIC BE's non-API endpoints goes here
 ├── scripts/                # One-off helper scripts (e.g. data seeding)
-├── tests/                  # pytest suite for the Auth BFF
 ├── types/                  # Shared type definitions used across the application
 │   └── api_responses/      # Pydantic response wrapper models returned to API clients
 ├── utils/                  # Helper functions and shared utility scripts
