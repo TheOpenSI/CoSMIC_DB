@@ -5,10 +5,10 @@ from authlib.integrations.base_client import OAuthError
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from app.apis.table_models.users import Users
 from auth import config, keys
 from auth import session as cosmic_session
 from auth.claims import NormalizedClaims, keycloak_userinfo_to_claims
+from auth.models import Users
 from auth.oauth import oauth, refresh_keycloak_token, revoke_keycloak_session
 from auth.users_sync import ensure_user
 from cores.db import SessionDependency

@@ -5,11 +5,8 @@ from fastapi import HTTPException
 from sqlalchemy import func
 from sqlmodel import Session, select
 
-from app.apis.table_models.roles import Roles
-from app.apis.table_models.user_identities import UserIdentities
-from app.apis.table_models.users import Users
-
 from auth.claims import NormalizedClaims
+from auth.models import Roles, UserIdentities, Users
 
 
 def ensure_user(session: Session, claims: NormalizedClaims) -> Users:

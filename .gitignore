@@ -227,5 +227,8 @@ __marimo__/
 docker/secrets/
 docker/configs/
 
+# Auth (RS256 session keypair)
+auth/secrets/
+
 # Whitelists
 !examples/*.env*
