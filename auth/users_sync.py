@@ -8,9 +8,8 @@ from sqlmodel import Session, select
 from app.apis.table_models.roles import Roles
 from app.apis.table_models.user_identities import UserIdentities
 from app.apis.table_models.users import Users
-from app.apis.table_models.chatboxes import Chatboxes
 
-from auth.providers.base import NormalizedClaims
+from auth.claims import NormalizedClaims
 
 
 def ensure_user(session: Session, claims: NormalizedClaims) -> Users:

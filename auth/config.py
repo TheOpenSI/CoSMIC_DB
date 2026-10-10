@@ -1,4 +1,11 @@
-# config.py — Auth BFF settings (Keycloak + Google)
+# config.py — Auth BFF settings (Keycloak-only, Authlib)
+#
+# NOTE:
+# Google & Microsoft are no longer configured here. They are brokered by
+# Keycloak (see `docker/keycloak/cosmic-realm.json`) so the BFF only ever talks
+# to a single OpenID Connect provider.
+
+from pathlib import Path
 
 from .env import get_env
 
@@ -9,58 +16,72 @@ AUTH_PUBLIC_URL = cosmic_auth_configs.get("AUTH_PUBLIC_URL", "http://localhost:8
 FRONTEND_URL = cosmic_auth_configs.get("FRONTEND_URL", "http://localhost:5173")
 AUTH_API_PREFIX = "/api/v1/auth"
 
-ENABLED_PROVIDERS = [
-    p.strip().lower()
-    for p in (cosmic_auth_configs.get("ENABLED_PROVIDERS") or "keycloak,google").split(",")
-    if p.strip()
-]
-
-SESSION_SECRET = cosmic_auth_configs.get("SESSION_SECRET")
+# ── Cosmic session (app-issued JWT, RS256) ──────────────────────────────────
 SESSION_COOKIE_NAME = cosmic_auth_configs.get("SESSION_COOKIE_NAME", "cosmic_session")
-SESSION_MAX_AGE = int(cosmic_auth_configs.get("SESSION_MAX_AGE"))
+SESSION_MAX_AGE = int(cosmic_auth_configs.get("SESSION_MAX_AGE") or "900")
 REFRESH_COOKIE_MAX_AGE = int(cosmic_auth_configs.get("REFRESH_COOKIE_MAX_AGE") or "86400")
+SESSION_ISSUER = cosmic_auth_configs.get("SESSION_ISSUER", "cosmic-auth")
 
+# Static RSA keypair used to sign/verify the Cosmic session cookie. The private
+# key never leaves this service; the public half is published at
+# `{AUTH_API_PREFIX}/jwks.json` for the other microservices.
+SESSION_PRIVATE_KEY_PATH = Path(
+    cosmic_auth_configs.get("SESSION_PRIVATE_KEY_PATH")
+    or (Path(__file__).resolve().parent / "secrets" / "session_private.pem")
+)
+SESSION_PUBLIC_KEY_PATH = Path(
+    cosmic_auth_configs.get("SESSION_PUBLIC_KEY_PATH")
+    or (Path(__file__).resolve().parent / "secrets" / "session_public.pem")
+)
+# Optional explicit key id; falls back to the RFC 7638 thumbprint of the key.
+SESSION_KEY_ID = cosmic_auth_configs.get("SESSION_KEY_ID")
 
-# Legacy IdP token cookies (Phase 0–1). Cosmic session comes in Phase 1.
+# ── Starlette SessionMiddleware (holds temporary Authlib OAuth state/nonce) ──
+SESSION_SECRET = cosmic_auth_configs.get("SESSION_SECRET") or "cosmic-insecure-dev-secret"
+OAUTH_SESSION_COOKIE = cosmic_auth_configs.get("OAUTH_SESSION_COOKIE", "cosmic_oauth_session")
+
+# Legacy cookies. Names are kept so we can clear them for one release after the
+# migration to Authlib + RS256.
 ACCESS_TOKEN_COOKIE = "cosmic_access_token"
 REFRESH_TOKEN_COOKIE = "cosmic_refresh_token"
 OAUTH_STATE_COOKIE = "cosmic_oauth_state"
 OAUTH_PROVIDER_COOKIE = "cosmic_oauth_provider"
 
-
-def callback_url(provider: str) -> str:
-    """Per-provider callback — must match IdP console redirect URI."""
-    return f"{AUTH_PUBLIC_URL}{AUTH_API_PREFIX}/callback/{provider}"
-
-
 # ── Keycloak ────────────────────────────────────────────────────────────────
-KEYCLOAK_INTERNAL_URL = cosmic_auth_configs.get("KEYCLOAK_INTERNAL_URL", "http://cosmic-keycloak:8080")
-KEYCLOAK_PUBLIC_URL = cosmic_auth_configs.get("KEYCLOAK_PUBLIC_URL", "http://localhost:8080")
+KEYCLOAK_INTERNAL_URL = cosmic_auth_configs.get(
+    "KEYCLOAK_INTERNAL_URL", "http://cosmic-keycloak:8080"
+)
+KEYCLOAK_PUBLIC_URL = cosmic_auth_configs.get(
+    "KEYCLOAK_PUBLIC_URL", "http://localhost:8080"
+)
 KEYCLOAK_REALM = cosmic_auth_configs.get("KEYCLOAK_REALM", "cosmic")
 KEYCLOAK_CLIENT_ID = cosmic_auth_configs.get("KEYCLOAK_CLIENT_ID")
 KEYCLOAK_CLIENT_SECRET = cosmic_auth_configs.get("KEYCLOAK_CLIENT_SECRET")
 OIDC_ISSUER = f"{KEYCLOAK_PUBLIC_URL}/realms/{KEYCLOAK_REALM}"
 
-# ── Google ──────────────────────────────────────────────────────────────────
-GOOGLE_CLIENT_ID = cosmic_auth_configs.get("GOOGLE_CLIENT_ID")
-GOOGLE_CLIENT_SECRET = cosmic_auth_configs.get("GOOGLE_CLIENT_SECRET")
-GOOGLE_AUTH_URL = cosmic_auth_configs.get(
-    "GOOGLE_AUTH_URL", "https://accounts.google.com/o/oauth2/v2/auth"
-)
-GOOGLE_TOKEN_URL = cosmic_auth_configs.get(
-    "GOOGLE_TOKEN_URL", "https://oauth2.googleapis.com/token"
-)
-GOOGLE_JWKS_URL = cosmic_auth_configs.get(
-    "GOOGLE_JWKS_URL", "https://www.googleapis.com/oauth2/v3/certs"
-)
-GOOGLE_ISSUER = cosmic_auth_configs.get("GOOGLE_ISSUER", "https://accounts.google.com")
+_KEYCLOAK_REALM_PATH = f"/realms/{KEYCLOAK_REALM}/protocol/openid-connect"
 
-# ── Azure AD ─────────────────────────────────────────────────────────────────
-AZURE_AD_CLIENT_ID = cosmic_auth_configs.get("AZURE_AD_CLIENT_ID")
-AZURE_AD_TENANT_ID = cosmic_auth_configs.get("AZURE_AD_TENANT_ID")
-AZURE_AD_CLIENT_SECRET = cosmic_auth_configs.get("AZURE_AD_CLIENT_SECRET")
-AZURE_AD_ISSUER = f"https://login.microsoftonline.com/{AZURE_AD_TENANT_ID}/v2.0"
 
-AZURE_AD_AUTH_URL  = f"https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
-AZURE_AD_TOKEN_URL = f"https://login.microsoftonline.com/common/oauth2/v2.0/token"
-AZURE_AD_JWKS_URL  = f"https://login.microsoftonline.com/common/discovery/v2.0/keys"
+def keycloak_authorize_url() -> str:
+    """Browser-facing authorize endpoint (public host)."""
+    return f"{KEYCLOAK_PUBLIC_URL}{_KEYCLOAK_REALM_PATH}/auth"
+
+
+def keycloak_token_url() -> str:
+    """Container-facing token endpoint (internal host)."""
+    return f"{KEYCLOAK_INTERNAL_URL}{_KEYCLOAK_REALM_PATH}/token"
+
+
+def keycloak_jwks_url() -> str:
+    """Container-facing JWKS endpoint (internal host)."""
+    return f"{KEYCLOAK_INTERNAL_URL}{_KEYCLOAK_REALM_PATH}/certs"
+
+
+def keycloak_logout_url() -> str:
+    """Browser-facing RP-initiated logout endpoint (public host)."""
+    return f"{KEYCLOAK_PUBLIC_URL}{_KEYCLOAK_REALM_PATH}/logout"
+
+
+def callback_url(provider: str = "keycloak") -> str:
+    """Callback URL — must match the IdP console redirect URI."""
+    return f"{AUTH_PUBLIC_URL}{AUTH_API_PREFIX}/callback/{provider}"
