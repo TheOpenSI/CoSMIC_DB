@@ -45,17 +45,19 @@ SESSION_ISSUER: str | None = cosmic_auth_configs.get(
 SESSION_PRIVATE_KEY_PATH: Path | None = Path(
     cosmic_auth_configs.get("SESSION_PRIVATE_KEY_PATH")
     or
-    Path(__file__).resolve().parent.joinpath(
+    Path(__file__).resolve().parent.parent.joinpath(
+        "docker",
         "secrets",
-        "session_private.pem"
+        "cosmic_private_session.pem"
     )
 )
 SESSION_PUBLIC_KEY_PATH: Path = Path(
     cosmic_auth_configs.get("SESSION_PUBLIC_KEY_PATH")
     or
-    Path(__file__).resolve().parent.joinpath(
+    Path(__file__).resolve().parent.parent.joinpath(
+        "docker",
         "secrets",
-        "session_public.pem"
+        "cosmic_public_session.pem"
     )
 )
 SESSION_KEY_ID: str | None = cosmic_auth_configs.get(

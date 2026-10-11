@@ -31,7 +31,7 @@
 	"identityProviders": [
 		{
 			"alias": "google",
-			"displayName": "Google",
+			"displayName": "Google OIDC",
 			"providerId": "google",
 			"enabled": true,
 			"trustEmail": true,
@@ -50,7 +50,7 @@
 		},
 		{
 			"alias": "microsoft",
-			"displayName": "Microsoft",
+			"displayName": "Microsoft OIDC",
 			"providerId": "microsoft",
 			"enabled": true,
 			"trustEmail": true,
@@ -71,7 +71,7 @@
 	"clients": [
 		{
 			"clientId": "cosmic-fastapi-keycloak",
-			"name": "CoSMIC fastapi-keycloak",
+			"name": "CoSMIC FastAPI Keycloak",
 			"enabled": true,
 			"publicClient": false,
 			"clientAuthenticatorType": "client-secret",
@@ -96,7 +96,7 @@
 			"emailVerified": true,
 			"enabled": true,
 			"firstName": "OpenSI",
-			"lastName": "cosmic",
+			"lastName": "CoSMIC",
 			"credentials": [
 				{
 					"type": "password",

@@ -117,7 +117,7 @@ services:
         target: keycloak_smtp_user.txt
       - source: cosmic-keycloak-smtp-pwd
         target: keycloak_smtp_pwd.txt
-      # NOTE: Resolved into the realm's identityProviders (Google & Microsoft).
+      # NOTE: Resolved into the realm's IdPs (Google & Microsoft).
       - source: cosmic-keycloak-google-client-id
         target: keycloak_google_client_id.txt
       - source: cosmic-keycloak-google-client-secret
@@ -134,7 +134,7 @@ services:
       KC_HOSTNAME_PORT: 8080
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_ENABLED: "true"
-    # Image entrypoint is kc.sh; override so we can load secrets into env first
+    # Image entrypoint is `kc.sh` so we override it to load secrets into env first
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
