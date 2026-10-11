@@ -97,7 +97,7 @@ services:
         mode: host
     networks:
         - cosmic-backend
-    
+
   keycloak:
     container_name: cosmic-keycloak
     image: quay.io/keycloak/keycloak:26.0
@@ -117,13 +117,24 @@ services:
         target: keycloak_smtp_user.txt
       - source: cosmic-keycloak-smtp-pwd
         target: keycloak_smtp_pwd.txt
+      # NOTE: Resolved into the realm's IdPs (Google & Microsoft).
+      - source: cosmic-keycloak-google-client-id
+        target: keycloak_google_client_id.txt
+      - source: cosmic-keycloak-google-client-secret
+        target: keycloak_google_client_secret.txt
+      - source: cosmic-keycloak-microsoft-client-id
+        target: keycloak_microsoft_client_id.txt
+      - source: cosmic-keycloak-microsoft-client-secret
+        target: keycloak_microsoft_client_secret.txt
+      - source: cosmic-keycloak-microsoft-tenant-id
+        target: keycloak_microsoft_tenant_id.txt
     environment:
       JAVA_OPTS_APPEND: "-Dkeycloak.migration.replace-placeholders=true"
       KC_HOSTNAME: localhost
       KC_HOSTNAME_PORT: 8080
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_ENABLED: "true"
-    # Image entrypoint is kc.sh; override so we can load secrets into env first
+    # Image entrypoint is `kc.sh` so we override it to load secrets into env first
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
@@ -134,6 +145,11 @@ services:
         export KEYCLOAK_CLIENT_SECRET="$$(tr -d '\r\n' < /run/secrets/keycloak_client_secret.txt)"
         export KEYCLOAK_TEST_USER_EMAIL="$$(tr -d '\r\n' < /run/secrets/keycloak_test_user_email.txt)"
         export KEYCLOAK_TEST_USER_PASSWORD="$$(tr -d '\r\n' < /run/secrets/keycloak_test_user_pwd.txt)"
+        export KEYCLOAK_GOOGLE_CLIENT_ID="$$(tr -d '\r\n' < /run/secrets/keycloak_google_client_id.txt)"
+        export KEYCLOAK_GOOGLE_CLIENT_SECRET="$$(tr -d '\r\n' < /run/secrets/keycloak_google_client_secret.txt)"
+        export KEYCLOAK_MICROSOFT_CLIENT_ID="$$(tr -d '\r\n' < /run/secrets/keycloak_microsoft_client_id.txt)"
+        export KEYCLOAK_MICROSOFT_CLIENT_SECRET="$$(tr -d '\r\n' < /run/secrets/keycloak_microsoft_client_secret.txt)"
+        export KEYCLOAK_MICROSOFT_TENANT_ID="$$(tr -d '\r\n' < /run/secrets/keycloak_microsoft_tenant_id.txt)"
         exec /opt/keycloak/bin/kc.sh start-dev --import-realm
     volumes:
       - type: volume
@@ -152,6 +168,7 @@ services:
         mode: host
     networks:
       - cosmic-backend
+
   fastapi_keycloak:
     container_name: cosmic-fastapi-keycloak
     restart: unless-stopped
@@ -245,6 +262,21 @@ secrets:
     
   cosmic-keycloak-smtp-pwd:
     file: ./docker/secrets/keycloak_smtp_pwd.txt
+
+  cosmic-keycloak-google-client-id:
+    file: ./docker/secrets/keycloak_google_client_id.txt
+
+  cosmic-keycloak-google-client-secret:
+    file: ./docker/secrets/keycloak_google_client_secret.txt
+
+  cosmic-keycloak-microsoft-client-id:
+    file: ./docker/secrets/keycloak_microsoft_client_id.txt
+
+  cosmic-keycloak-microsoft-client-secret:
+    file: ./docker/secrets/keycloak_microsoft_client_secret.txt
+
+  cosmic-keycloak-microsoft-tenant-id:
+    file: ./docker/secrets/keycloak_microsoft_tenant_id.txt
 
 
 configs:

@@ -1,64 +1,110 @@
 {
-  "realm": "cosmic",
-  "enabled": true,
-  "ssoSessionIdleTimeout": 86400,
-  "ssoSessionMaxLifespan": 86400,
-  "clientSessionIdleTimeout": 86400,
-  "clientSessionMaxLifespan": 86400,
-  "accessTokenLifespan": 300,
-  "registrationAllowed": true,
-  "loginWithEmailAllowed": true,
-  "resetPasswordAllowed": true,
-  "verifyEmail" : true,
-  "smtpServer": {
-    "host": "smtp.gmail.com",
-    "port": "587",
-    "from": "${KEYCLOAK_SMTP_USER}",
-    "fromDisplayName": "CoSMIC",
-    "starttls": "true",
-    "auth": "true",
-    "user": "${KEYCLOAK_SMTP_USER}",
-    "password": "${KEYCLOAK_SMTP_PWD}",
-    "ssl": "false"
+	"realm": "cosmic",
+	"enabled": true,
+	"ssoSessionIdleTimeout": 86400,
+	"ssoSessionMaxLifespan": 86400,
+	"clientSessionIdleTimeout": 86400,
+	"clientSessionMaxLifespan": 86400,
+	"accessTokenLifespan": 300,
+	"registrationAllowed": true,
+	"loginWithEmailAllowed": true,
+	"resetPasswordAllowed": true,
+	"verifyEmail" : true,
+	"smtpServer": {
+		"host": "smtp.gmail.com",
+		"port": "587",
+		"from": "${KEYCLOAK_SMTP_USER}",
+		"fromDisplayName": "CoSMIC",
+		"starttls": "true",
+		"auth": "true",
+		"user": "${KEYCLOAK_SMTP_USER}",
+		"password": "${KEYCLOAK_SMTP_PWD}",
+		"ssl": "false"
 
-  },
-  "roles": {
-    "realm": [
-      { "name": "admin" },
-      { "name": "user" }
-    ]
-  },
-  "clients": [
-    {
-      "clientId": "cosmic-fastapi-keycloak",
-      "name": "CoSMIC fastapi-keycloak",
-      "enabled": true,
-      "publicClient": false,
-      "clientAuthenticatorType": "client-secret",
-      "secret": "${KEYCLOAK_CLIENT_SECRET}",
-      "redirectUris": ["http://localhost:8081/api/v1/auth/callback/keycloak"],
-      "webOrigins": ["http://localhost:5173", "http://localhost:8081"],
-      "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": false,
-      "protocol": "openid-connect"
-    }
-  ],
-  "users": [
-    {
-      "username": "cosmic",
-      "email": "${KEYCLOAK_TEST_USER_EMAIL}",
-      "emailVerified": true,
-      "enabled": true,
-      "firstName": "OpenSI",
-      "lastName": "cosmic",
-      "credentials": [
-        {
-          "type": "password",
-          "value": "${KEYCLOAK_TEST_USER_PASSWORD}",
-          "temporary": false
-        }
-      ],
-      "realmRoles": ["admin"]
-    }
-  ]
+	},
+	"roles": {
+		"realm": [
+			{ "name": "admin" },
+			{ "name": "user" }
+		]
+	},
+	"identityProviders": [
+		{
+			"alias": "google",
+			"displayName": "Google OIDC",
+			"providerId": "google",
+			"enabled": true,
+			"trustEmail": true,
+			"storeToken": false,
+			"addReadTokenRoleOnCreate": false,
+			"authenticateByDefault": false,
+			"linkOnly": false,
+			"firstBrokerLoginFlowAlias": "first broker login",
+			"config": {
+				"clientId": "${KEYCLOAK_GOOGLE_CLIENT_ID}",
+				"clientSecret": "${KEYCLOAK_GOOGLE_CLIENT_SECRET}",
+				"defaultScope": "openid profile email",
+				"syncMode": "IMPORT",
+				"useJwksUrl": "true"
+			}
+		},
+		{
+			"alias": "microsoft",
+			"displayName": "Microsoft OIDC",
+			"providerId": "microsoft",
+			"enabled": true,
+			"trustEmail": true,
+			"storeToken": false,
+			"addReadTokenRoleOnCreate": false,
+			"authenticateByDefault": false,
+			"linkOnly": false,
+			"firstBrokerLoginFlowAlias": "first broker login",
+			"config": {
+				"clientId": "${KEYCLOAK_MICROSOFT_CLIENT_ID}",
+				"clientSecret": "${KEYCLOAK_MICROSOFT_CLIENT_SECRET}",
+				"tenantId": "${KEYCLOAK_MICROSOFT_TENANT_ID}",
+				"defaultScope": "openid profile email",
+				"syncMode": "IMPORT"
+			}
+		}
+	],
+	"clients": [
+		{
+			"clientId": "cosmic-fastapi-keycloak",
+			"name": "CoSMIC FastAPI Keycloak",
+			"enabled": true,
+			"publicClient": false,
+			"clientAuthenticatorType": "client-secret",
+			"secret": "${KEYCLOAK_CLIENT_SECRET}",
+			"redirectUris": ["http://localhost:8081/api/v1/auth/callback/keycloak"],
+			"webOrigins": [
+				"http://localhost:5173",
+				"http://localhost:8081"
+			],
+			"attributes": {
+				"post.logout.redirect.uris": "http://localhost:5173/*##http://localhost:8081/*"
+			},
+			"standardFlowEnabled": true,
+			"directAccessGrantsEnabled": false,
+			"protocol": "openid-connect"
+		}
+	],
+	"users": [
+		{
+			"username": "cosmic",
+			"email": "${KEYCLOAK_TEST_USER_EMAIL}",
+			"emailVerified": true,
+			"enabled": true,
+			"firstName": "OpenSI",
+			"lastName": "CoSMIC",
+			"credentials": [
+				{
+					"type": "password",
+					"value": "${KEYCLOAK_TEST_USER_PASSWORD}",
+					"temporary": false
+				}
+			],
+			"realmRoles": ["admin"]
+		}
+	]
 }

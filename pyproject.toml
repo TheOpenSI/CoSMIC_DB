@@ -10,8 +10,11 @@ dependencies = [
     # NOTE: Use 'psycopg[binary]' version on production.
     "psycopg>=3.3.3",
     "sqlmodel>=0.0.37",
-    "httpx>=0.28.0",
-    "pyjwt[crypto]>=2.10.0",
+    "authlib>=1.8.0",
+    "httpx2>=2.13.1",
+    # NOTE: Required by Starlette's SessionMiddleware, which Authlib uses to
+    # keep the temporary OAuth state/nonce.
+    "itsdangerous>=2.2.0",
     # NOTE: Used to detect near-miss (e.g. L337) immutable field value mimicry.
     "rapidfuzz>=3.14.5",
 ]
