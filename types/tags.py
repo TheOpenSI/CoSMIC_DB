@@ -21,4 +21,3 @@ class APITag(Enum):
     chatbox     = "Chatboxes API Endpoint"
     emission    = "Emissions API Endpoint"
     token       = "Tokens API Endpoint"
-    auth        = "Auths API Endpoint"
