@@ -1,7 +1,6 @@
 .git/
 .venv/
 docker/
-!docker/secrets/*.pem
 examples/
 .dockerignore
 .gitattributes

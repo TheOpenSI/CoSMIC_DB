@@ -15,7 +15,6 @@ Write-Host "==> Creating required directories..."
 New-Item -ItemType Directory -Force -Path "docker\secrets" | Out-Null
 New-Item -ItemType Directory -Force -Path "docker\configs" | Out-Null
 New-Item -ItemType Directory -Force -Path "cores" | Out-Null
-New-Item -ItemType Directory -Force -Path "auth" | Out-Null
 
 Write-Host "==> Checking and preparing environment/configuration files..."
 
@@ -41,13 +40,6 @@ foreach ($file in (Get-ChildItem -Path "examples" -Filter "cosmic_cfg*.example.e
     Invoke-SafeCopy -Source $file.FullName -Destination "cores\$newName"
 }
 
-# Auth (.env) → auth/
-foreach ($file in (Get-ChildItem -Path "examples" -Filter "cosmic_auth.example.env" -ErrorAction SilentlyContinue))
-{
-    $newName = $file.Name -replace "\.example", ""
-    Invoke-SafeCopy -Source $file.FullName -Destination "auth\$newName"
-}
-
 # PostgreSQL (.txt)
 foreach ($file in (Get-ChildItem -Path "examples" -Filter "postgres_*.example.txt" -ErrorAction SilentlyContinue))
 {
@@ -67,42 +59,6 @@ foreach ($file in (Get-ChildItem -Path "examples" -Filter "pgadmin_*.example.jso
 {
     $newName = $file.Name -replace "\.example", ""
     Invoke-SafeCopy -Source $file.FullName -Destination "docker\configs\$newName"
-}
-
-# Keycloak secrets (.txt)
-foreach ($file in (Get-ChildItem -Path "examples" -Filter "keycloak_*.example.txt" -ErrorAction SilentlyContinue))
-{
-    $newName = $file.Name -replace "\.example", ""
-    Invoke-SafeCopy -Source $file.FullName -Destination "docker\secrets\$newName"
-}
-
-# Generates the RS256 key-pair used to sign the CoSMIC session cookie
-$secretsDir = Join-Path $projectRoot "docker\secrets"
-$privateKey = Join-Path $secretsDir "cosmic_private_session.pem"
-$publicKey = Join-Path $secretsDir "cosmic_public_session.pem"
-
-if ((Test-Path $privateKey) -and (Test-Path $publicKey))
-{
-    Write-Host "==> Skipped: session key-pair already exists at [$secretsDir] (left untouched)."
-}
-else
-{
-    Write-Host "==> Generating RSA-2048 session keypair..."
-    $rsa = [System.Security.Cryptography.RSA]::Create(2048)
-    try
-    {
-        [System.IO.File]::WriteAllText($privateKey, $rsa.ExportPkcs8PrivateKeyPem())
-        [System.IO.File]::WriteAllText($publicKey, $rsa.ExportSubjectPublicKeyInfoPem())
-    }
-    finally
-    {
-        $rsa.Dispose()
-    }
-
-    Write-Host "Generated:"
-    Write-Host " 1. [$privateKey]"
-    Write-Host " 2. [$publicKey]"
-    Write-Host "NOTE: Never commit these files. Rotating the keypair invalidates all active sessions."
 }
 
 Write-Host "==> Setup complete!"
