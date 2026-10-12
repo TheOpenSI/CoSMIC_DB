@@ -97,94 +97,6 @@ services:
         mode: host
     networks:
         - cosmic-backend
-    
-  keycloak:
-    container_name: cosmic-keycloak
-    image: quay.io/keycloak/keycloak:26.0
-    restart: unless-stopped
-    secrets:
-      - source: cosmic-keycloak-admin-usr
-        target: keycloak_admin_usr.txt
-      - source: cosmic-keycloak-admin-pwd
-        target: keycloak_admin_pwd.txt
-      - source: cosmic-keycloak-client-secret
-        target: keycloak_client_secret.txt
-      - source: cosmic-keycloak-test-user-email
-        target: keycloak_test_user_email.txt
-      - source: cosmic-keycloak-test-user-pwd
-        target: keycloak_test_user_pwd.txt
-      - source: cosmic-keycloak-smtp-user
-        target: keycloak_smtp_user.txt
-      - source: cosmic-keycloak-smtp-pwd
-        target: keycloak_smtp_pwd.txt
-    environment:
-      JAVA_OPTS_APPEND: "-Dkeycloak.migration.replace-placeholders=true"
-      KC_HOSTNAME: localhost
-      KC_HOSTNAME_PORT: 8080
-      KC_HOSTNAME_STRICT: "false"
-      KC_HTTP_ENABLED: "true"
-    # Image entrypoint is kc.sh; override so we can load secrets into env first
-    entrypoint: ["/bin/bash", "-c"]
-    command:
-      - |
-        export KEYCLOAK_SMTP_USER="$(tr -d '\r\n' < /run/secrets/keycloak_smtp_user.txt)"
-        export KEYCLOAK_SMTP_PWD="$(tr -d '\r\n' < /run/secrets/keycloak_smtp_pwd.txt)"
-        export KC_BOOTSTRAP_ADMIN_USERNAME="$$(tr -d '\r\n' < /run/secrets/keycloak_admin_usr.txt)"
-        export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(tr -d '\r\n' < /run/secrets/keycloak_admin_pwd.txt)"
-        export KEYCLOAK_CLIENT_SECRET="$$(tr -d '\r\n' < /run/secrets/keycloak_client_secret.txt)"
-        export KEYCLOAK_TEST_USER_EMAIL="$$(tr -d '\r\n' < /run/secrets/keycloak_test_user_email.txt)"
-        export KEYCLOAK_TEST_USER_PASSWORD="$$(tr -d '\r\n' < /run/secrets/keycloak_test_user_pwd.txt)"
-        exec /opt/keycloak/bin/kc.sh start-dev --import-realm
-    volumes:
-      - type: volume
-        source: cosmic-keycloak-data
-        target: /opt/keycloak/data
-      - type: bind
-        source: ./docker/keycloak/cosmic-realm.json
-        target: /opt/keycloak/data/import/cosmic-realm.json
-    ports:
-      - name: keycloak
-        target: 8080
-        host_ip: 127.0.0.1
-        published: "8080"
-        protocol: tcp
-        app_protocol: http
-        mode: host
-    networks:
-      - cosmic-backend
-  fastapi_keycloak:
-    container_name: cosmic-fastapi-keycloak
-    restart: unless-stopped
-    depends_on:
-      keycloak:
-        condition: service_started
-        required: true
-    build:
-      context: ./
-      dockerfile: ./docker/dockerfiles/fastapi-keycloak.Dockerfile
-    volumes:
-      - type: bind
-        source: ./auth
-        target: /app/auth
-      - type: bind
-        source: ./apis
-        target: /app/apis
-      - type: bind
-        source: ./cores
-        target: /app/cores
-      - type: bind
-        source: ./types
-        target: /app/types
-    ports:
-      - name: cosmic-fastapi-keycloak
-        target: 8081
-        host_ip: 127.0.0.1
-        published: "8081"
-        protocol: tcp
-        app_protocol: http
-        mode: host
-    networks:
-      - cosmic-backend
 
 volumes:
   # NOTE: as explained above, define this only in dev (delete on prod).
@@ -200,10 +112,6 @@ volumes:
   # container due to disadvantage of Docker Overlay2 (on prod only)
   cosmic-pgadmin-data:
     name: cosmic-database-gui
-
-  # NOTE: persists Keycloak users/sessions across compose down/up (dev)
-  cosmic-keycloak-data:
-    name: cosmic-keycloak-data
 
 
 networks:
@@ -224,27 +132,6 @@ secrets:
 
   cosmic-pgadmin-password:
     file: ./docker/secrets/pgadmin_pwd.txt
-
-  cosmic-keycloak-admin-usr:
-    file: ./docker/secrets/keycloak_admin_usr.txt
-
-  cosmic-keycloak-admin-pwd:
-    file: ./docker/secrets/keycloak_admin_pwd.txt
-
-  cosmic-keycloak-client-secret:
-    file: ./docker/secrets/keycloak_client_secret.txt
-
-  cosmic-keycloak-test-user-email:
-    file: ./docker/secrets/keycloak_test_user_email.txt
-
-  cosmic-keycloak-test-user-pwd:
-    file: ./docker/secrets/keycloak_test_user_pwd.txt
-
-  cosmic-keycloak-smtp-user:
-    file: ./docker/secrets/keycloak_smtp_user.txt
-    
-  cosmic-keycloak-smtp-pwd:
-    file: ./docker/secrets/keycloak_smtp_pwd.txt
 
 
 configs:
