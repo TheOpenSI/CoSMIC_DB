@@ -6,13 +6,11 @@ COSMIC-DB/
 │   ├── data_models/        # Pydantic models for request validation and API responses
 │   ├── table_models/       # SQLModel ORM table definitions mapped to PostgreSQL database tables
 │   └── base_models.py      # SQLModel base classes inherited by both table and data models
-├── auth/                   # Auth BFF Framework
 ├── bins/                   # Helper scripts, 3rd vendor binaries, etc
 ├── cores/                  # Central backend logic, database engines, and global configurations
 ├── docker/                 # Containerization resources and orchestration files
 │   ├── configs/            # Non-sensitive configuration files for Docker services
 │   ├── dockerfiles/        # Dockerfile for each services defined in Docker Compose file
-│   ├── keycloak/           # Keycloak realm export imported on first container start
 │   └── secrets/            # Secure storage for sensitive data like database credentials
 ├── examples/               # Template files and default values for rapid environment setup
 ├── migrations/             # Alembic database migration scripts and utilities
@@ -140,13 +138,6 @@ Then, copy the following files from the `examples/` directory to the following l
 - `examples/pgadmin_*.example.txt` &rarr; `docker/secrets/pgadmin_*.txt` (contains pgAdmin credentials and authentication files).
 - `examples/pgadmin_*.example.json` &rarr; `docker/configs/pgadmin_*.json` (contains pgAdmin server definitions and non-sensitive configuration).
 
-4. **Auth service**:
-- `examples/cosmic_auth.example.env` &rarr; `auth/cosmic_auth.env` (contains Keycloak, Authlib session, and RS256 session-key settings. See [Configure Authentication Credentials](#configure-authentication-credentials) for more details).
-- Generate the RS256 session keypair used to sign the CoSMIC session cookie using either `.\bins\Setup.ps1` (Windows) or `./bins/setup.sh` (Linux/macOS).
-
-5. **Keycloak service**:
-- `examples/keycloak_*.example.txt` &rarr; `docker/secrets/keycloak_*.txt` (contains Keycloak admin credentials, the confidential client secret, the seeded test user, and the Google/Microsoft client credentials brokered by Keycloak).
-
 > [!TIP]
 > Before finalising these files, review and adjust default values (Keep default setting if you're unsure about whether or not to modify it):
 > - Password
@@ -226,7 +217,7 @@ Before you begin, ensure you have **Docker** & **Docker Compose** installed on y
 
 ### **1. Starting Docker Services**
 
-From the project root directory, ensure you've completed the steps in the [Docker Configuration](#docker-configuration) section above, including [Configuring Authentication Credentials](#0-configuring-authentication-credentials). Set the Keycloak client secret, the Google/Microsoft broker credentials, and session values **before** the first `docker compose up` so Keycloak imports a matching client secret. Then start all the service using the Docker Compose file:
+From the project root directory, ensure you've completed the steps in the [Docker Configuration](#docker-configuration) section above. Then start all the service using the Docker Compose file:
 
 ```bash
 # Linux/MacOS
@@ -284,6 +275,17 @@ py --version
 uv --version
 psql --version
 ```
+
+### **0. Configuring Authentication**
+
+Authentication now lives in its own repository, **CoSMIC Auth** (`cosmic-auth`).
+This repository only needs its database configuration:
+
+- `examples/cosmic_cfg.example.env` &rarr; `cores/cosmic_cfg.env` (PostgreSQL connection and application settings)
+
+See the `cosmic-auth` README for Keycloak, Google/Microsoft identity brokering,
+and the RS256 session-key setup. The Auth service listens on port `8081` and
+shares the `cosmic_net` Docker network with this repository.
 
 ### **1. Installing Dependencies**
 
@@ -348,107 +350,3 @@ postgres=#
 ```
 
 The version number and exact format may vary depending on your PostgreSQL installation, but the prompt indicates a successful connection.
-
-# **Configure Authentication Credentials**
-
-> [!CAUTION]
-> DO **NOT** COMMIT REAL CREDENTIALS.
-
-After running `.\bins\Setup.ps1` (Windows) or `./bins/setup.sh` (Linux/MacOS), the setup script copies example files into:
-
-- `auth/cosmic_auth.env` (Keycloak, Authlib session, and RS256 session-key settings used by the backend)
-- `docker/secrets/cosmic_{public,private}_session.pem` (the RS256 key that signs the CoSMIC session cookie)
-- `docker/secrets/keycloak_client_secret.txt` (the same Keycloak confidential-client secret mounted into the Keycloak container)
-
-Open `auth/cosmic_auth.env` and replace the defaults below:
-
-> [!IMPORTANT]
-> `KEYCLOAK_CLIENT_SECRET` environment variable value **must be identical** to
-> `docker/secrets/keycloak_client_secret.txt` value. If they differ, Keycloak
-> login will fail because the backend and Keycloak will not share the same client
-> secret.
-
-## **Google & Microsoft (brokered by Keycloak)**
-
-> [!TIP]
-> The realm import substitutes `${KEYCLOAK_GOOGLE_*}`/`${KEYCLOAK_MICROSOFT_*}`
-> from those secrets on first boot. Set them **before** the first
-> `docker compose up`. To change them later, either update the IdPs in the
-> Keycloak admin console, or remove the `cosmic-keycloak-data` volume and start
-> again so the realm is re-imported.
-
-The platform itself only talks to Keycloak as Google & Microsoft are configured as its **identity providers (IdPs)**. Because of that, Keycloak login page shows a very clean typical username/password form + Google & Microsoft login icons by default.
-
-Register each provider in its own console and use **Keycloak's broker callback** as the redirect URI (not the CoSMIC BFF Framework):
-
-
-| Provider  | Redirect URI                                                      |
-| --------- | ----------------------------------------------------------------- |
-| Google    | `http://localhost:8080/realms/cosmic/broker/google/endpoint`      |
-| Microsoft | `http://localhost:8080/realms/cosmic/broker/microsoft/endpoint`   |
-
-
-1. **Google**: [Google Cloud Console](https://console.developers.google.com/) &rarr; **APIs & Services** &rarr; **Credentials** &rarr; **Create credentials** &rarr; **OAuth client ID** (type **Web application**). Add the Google redirect URI above, then put the client ID/secret in `docker/secrets/keycloak_google_client_id.txt` & `docker/secrets/keycloak_google_client_secret.txt` respectively.
-
-2. **Microsoft**: [Azure Portal](https://portal.azure.com/) &rarr; **App registrations** &rarr; **New registration**. Add the Microsoft redirect URI above, then put the application (client) ID/secret in `docker/secrets/keycloak_microsoft_client_id.txt` & `docker/secrets/keycloak_microsoft_client_secret.txt` respectively, and the directory (tenant) ID (or `common` for multi-tenant) in `docker/secrets/keycloak_microsoft_tenant_id.txt`.
-
-## **Keycloak client secret**
-
-> [!TIP]
-> Set this **before** the first Keycloak start. Keycloak imports
-> `docker/keycloak/cosmic-realm.json` on first boot and substitutes
-> `${KEYCLOAK_CLIENT_SECRET}` from `docker/secrets/keycloak_client_secret.txt`.
-> If you change the secret later, also update the client secret in the Keycloak
-> admin console (**Clients** &rarr; `cosmic-fastapi-keycloak` &rarr; **Credentials**),
-> or remove the Keycloak volume and start again so the realm is re-imported.
-
-The default `KEYCLOAK_CLIENT_SECRET` is only a local example. You may keep it for a first run, but we recommend replacing it with a unique value.
-
-Generate a unique secret:
-
-```bash
-# Linux/MacOS
-uuidgen
-```
-```ps1
-# Windows
-[guid]::NewGuid().ToString()
-```
-
-Put **the same value** in both places:
-
-1. `auth/cosmic_auth.env`:
-
-```txt
-KEYCLOAK_CLIENT_SECRET=<your-unique-secret>
-```
-
-2. `docker/secrets/keycloak_client_secret.txt`:
-
-```txt
-<your-unique-secret>
-```
-
-You can leave `KEYCLOAK_CLIENT_ID=cosmic-fastapi-keycloak` and the Keycloak URLs/realm defaults unless you have changed those in the realm export.
-
-## **Session keys (RS256) and `SESSION_SECRET`**
-
-> [!CAUTION]
-> Rotating the RS256 key-pair invalidates every active session (users must log in
-> again) and invalidates cached JWKS in the other services. Rotating
-> `SESSION_SECRET` only interrupts logins that are in flight.
-
-The CoSMIC session cookie is a JWT signed with **RS256** encryption algorithm using a static RSA key-pair. This way, other micro-services can verify it with the public key only.
-
-- Generate the key-pair with `.\bins\Setup.ps1` (Windows) or `./bins/setup.sh` (Linux/MacOS). It writes `docker/secrets/session_private.pem` & `docker/secrets/session_public.pem`.
-- The public half is published at `http://localhost:8081/api/v1/auth/jwks.json` for the other services to discover.
-- `cosmic_session` is the **only** application cookie. Because of that, Keycloak refresh token travels inside it as a claim, so `/refresh` & `/logout` endpoints need no separate token cookie.
-- `SESSION_SECRET` is now only used to sign the temporary Authlib OAuth state/nonce cookie for [Starlette SessionMiddleWare](https://starlette.dev/middleware/#sessionmiddleware), separate from the RS256 key-pair.
-
-```txt
-SESSION_SECRET=<your-unique-session-secret>
-SESSION_COOKIE_NAME=cosmic_session
-SESSION_MAX_AGE=900
-REFRESH_TOKEN_MAX_AGE=86400
-OAUTH_SESSION_COOKIE=cosmic_oauth_session
-```
