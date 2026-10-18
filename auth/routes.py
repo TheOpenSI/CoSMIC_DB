@@ -1,5 +1,6 @@
 ### Core modules ###
 from urllib.parse import urlencode
+from httpx import HTTPError
 from authlib.integrations.base_client import OAuthError
 from fastapi import (
     APIRouter,
@@ -322,7 +323,16 @@ async def refresh(
             }
         )
 
-    user_id: UUID = UUID(str(old_session_token["user_id"]))
+    # Guard against case when session JWT is signed but never index blindly
+    stored_user_id: str | list[str] | None = old_session_token.get(
+        "user_id",
+        None
+    )
+
+    if not isinstance(stored_user_id, str):
+        return unauthorised_cleared()
+
+    user_id: UUID = UUID(stored_user_id)
 
     if session.get(
         entity=Users,
@@ -382,8 +392,11 @@ async def refresh(
             refresh_token
         )
 
+        # Use single response object only for cookie AND return body
+        response: JSONResponse = JSONResponse({"ok": True})
+
         set_session_cookie(
-            response=JSONResponse({"ok": True}),
+            response=response,
             claims=claims,
             user_id=user_id,
             refresh_token=new_refresh,
@@ -393,15 +406,27 @@ async def refresh(
             )
         )
 
-        return JSONResponse({"ok": True})
+        return response
 
-    except Exception:  # noqa: BLE001 - surface as a 401 to the client
+    except (
+        OAuthError,
+        HTTPError
+    ) as refresh_exc: # noqa: BLE001 - surface as a 401 to the client
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={
                 "status": "401 - Unauthorized",
                 "message": "Token refresh failed."
             }
+        ) from refresh_exc
+
+    except Exception as python_exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "status": "500 - Internal Server Error",
+                "message": f"Error: {python_exc}"
+                }
         )
 
 

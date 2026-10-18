@@ -84,14 +84,13 @@ def public_key() -> RSAKey:
 
 
 def key_id() -> str:
-    current_key_id:     str = str(SESSION_KEY_ID)
-    fallback_key_id:    str = str(public_key().kid)
+    current_key_id:     str | None = SESSION_KEY_ID
+    fallback_key_id:    str | None = public_key().kid
 
-    return (
-        current_key_id
-        or
-        fallback_key_id
-    )
+    if current_key_id:
+        return str(current_key_id)
+
+    return str(fallback_key_id)
 
 
 def jwk_set() -> dict[str, list[dict[str, str | list[str]]]]:
