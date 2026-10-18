@@ -106,7 +106,7 @@ Our backend expects configuration files to be organised in specific locations de
 ```
 ```ps1
 # Windows
-.\bins\Setup.ps1
+.\bins\setup.ps1
 ```
 
 ## Docker Configuration
@@ -275,17 +275,6 @@ py --version
 uv --version
 psql --version
 ```
-
-### **0. Configuring Authentication**
-
-Authentication now lives in its own repository, **CoSMIC Auth** (`cosmic-auth`).
-This repository only needs its database configuration:
-
-- `examples/cosmic_cfg.example.env` &rarr; `cores/cosmic_cfg.env` (PostgreSQL connection and application settings)
-
-See the `cosmic-auth` README for Keycloak, Google/Microsoft identity brokering,
-and the RS256 session-key setup. The Auth service listens on port `8081` and
-shares the `cosmic_net` Docker network with this repository.
 
 ### **1. Installing Dependencies**
 
