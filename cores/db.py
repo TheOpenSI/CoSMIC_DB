@@ -12,10 +12,8 @@ from typing_extensions import Annotated, Any, Generator
 
 
 ### Internal modules ###
-from .env import get_env
+from .configs import cosmic_db_configs
 
-
-cosmic_db_configs: dict[str, str | None] = get_env()
 
 cosmic_db_dia:  str | None = cosmic_db_configs["DB_DIALECT"]
 cosmic_db_dri:  str | None = cosmic_db_configs["DB_DRIVER"]

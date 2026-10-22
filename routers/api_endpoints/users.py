@@ -1,9 +1,14 @@
 ### Core modules ###
-import re
 from fastapi import (
     APIRouter,
     HTTPException,
     status
+)
+from re import (
+    IGNORECASE,
+    MULTILINE,
+    VERBOSE,
+    findall
 )
 from sqlmodel import select
 
@@ -11,7 +16,9 @@ from sqlmodel import select
 ### Type hints ###
 from pydantic.types import UUID7
 from typing import Any
+from uuid import UUID
 from collections.abc import Sequence
+from sqlalchemy.exc import IntegrityError
 from ...types.tags import APITag
 
 
@@ -22,6 +29,7 @@ from ...cores.globals import (
     OPENAPI_PATCH_EXTRA_RESPONSES,
     OPENAPI_DELETE_EXTRA_RESPONSES
 )
+from ...apis.table_models.roles import Roles
 from ...apis.table_models.users import Users
 from ...apis.data_models.users import (
     # For validation (Data Model)
@@ -33,6 +41,10 @@ from ...types.api_responses.users import (
     UserPublicResponse,
     UserUpdateResponse,
     UserDeleteResponse
+)
+from ...utils.auth_client import (
+    update_iam_user,
+    delete_iam_user
 )
 
 
@@ -140,6 +152,48 @@ async def update_user_v1(
                 }
             )
 
+    # 'name' is NOT NULL in the database and in the IAM. Reject a blank value
+    # before the IAM call so both stores stay consistent.
+    if "name" in user_data:
+        if (
+            user_data["name"] is None
+            or
+            not str(user_data["name"]).strip()
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "400 - Bad Request",
+                    "message": "Field [name] cannot be empty."
+                }
+            )
+
+    # Resolve the role before touching the IAM so an unknown/custom role can
+    # never leave Keycloak pointing at a role the DB cannot store.
+    if "role_id" in user_data:
+        if user_data["role_id"] is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "400 - Bad Request",
+                    "message": "Field [role_id] cannot be null."
+                }
+            )
+
+        role: Roles | None = session.get(
+            entity=Roles,
+            ident=UUID(str(user_data["role_id"]))
+        )
+
+        if role is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "status": "404 - Not Found",
+                    "message": "Role Not Found!"
+                }
+            )
+
     # Validation against 'email' field in payload
     if "email" in user_data:
         if user_data["email"] is not None:
@@ -148,13 +202,13 @@ async def update_user_v1(
             # special than a normal RegEx. The original form (assume using `/` as
             # default delims) is:
             #                       "/example|test|demo/gmix"
-            if re.findall(
+            if findall(
                 pattern=r"example|test|demo",
                 string=user_data["email"],
                 flags=(
-                    re.IGNORECASE   |
-                    re.MULTILINE    |
-                    re.VERBOSE
+                    IGNORECASE   |
+                    MULTILINE    |
+                    VERBOSE
                 )
             ):
                 raise HTTPException(
@@ -198,6 +252,13 @@ async def update_user_v1(
             )
 
 
+    # IAM first: the local row is only a fallback mirror. If this call fails,
+    # neither store changes and the caller gets the IAM error.
+    await update_iam_user(
+        user_id=str(user_id),
+        payload=user_data
+    )
+
     # Only perform UPDATE query if payload actually contains new data
     try:
         user_db.sqlmodel_update(obj=user_data)
@@ -232,7 +293,10 @@ async def delete_user_v1(
     user_id: UUID7,
     session: SessionDependency
 ) -> Any:
-    user_gone: Users | None = session.get(entity=Users, ident=user_id)
+    user_gone: Users | None = session.get(
+        entity=Users,
+        ident=user_id
+    )
 
     if user_gone is None:
         raise HTTPException(
@@ -240,6 +304,10 @@ async def delete_user_v1(
             detail="User Not Found!"
         )
     else:
+        # IAM first: deleting the fallback row only after the IAM accepted the
+        # deletion keeps Keycloak as the source of truth.
+        await delete_iam_user(user_id=str(user_id))
+
         session.delete(instance=user_gone)
         session.commit()
 
