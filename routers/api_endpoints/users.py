@@ -1,9 +1,14 @@
 ### Core modules ###
-import re
 from fastapi import (
     APIRouter,
     HTTPException,
     status
+)
+from re import (
+    IGNORECASE,
+    MULTILINE,
+    VERBOSE,
+    findall
 )
 from sqlmodel import select
 
@@ -11,7 +16,9 @@ from sqlmodel import select
 ### Type hints ###
 from pydantic.types import UUID7
 from typing import Any
+from uuid import UUID
 from collections.abc import Sequence
+from sqlalchemy.exc import IntegrityError
 from ...types.tags import APITag
 
 
@@ -22,6 +29,7 @@ from ...cores.globals import (
     OPENAPI_PATCH_EXTRA_RESPONSES,
     OPENAPI_DELETE_EXTRA_RESPONSES
 )
+from ...apis.table_models.roles import Roles
 from ...apis.table_models.users import Users
 from ...apis.data_models.users import (
     # For validation (Data Model)
@@ -33,6 +41,10 @@ from ...types.api_responses.users import (
     UserPublicResponse,
     UserUpdateResponse,
     UserDeleteResponse
+)
+from ...utils.auth_client import (
+    update_iam_user,
+    delete_iam_user
 )
 
 
@@ -140,6 +152,48 @@ async def update_user_v1(
                 }
             )
 
+    # Validation against 'role_id' field in payload. This's very important so
+    # that not a single unknown/custom role bypass the logic and leave IAM
+    # pointing at a role our db cannot store.
+    if "role_id" in user_data:
+        if user_data["role_id"] is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "400 - Bad Request",
+                    "message": "Field [role_id] cannot be null."
+                }
+            )
+
+        role: Roles | None = session.get(
+            entity=Roles,
+            ident=UUID(str(user_data["role_id"]))
+        )
+
+        if role is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "status": "404 - Not Found",
+                    "message": "Role Not Found!"
+                }
+            )
+
+    # Validation against 'name' field in payload
+    if "name" in user_data:
+        if (
+            user_data["name"] is None
+            or
+            not str(user_data["name"]).strip()
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "400 - Bad Request",
+                    "message": "Field [name] cannot be empty."
+                }
+            )
+
     # Validation against 'email' field in payload
     if "email" in user_data:
         if user_data["email"] is not None:
@@ -148,13 +202,13 @@ async def update_user_v1(
             # special than a normal RegEx. The original form (assume using `/` as
             # default delims) is:
             #                       "/example|test|demo/gmix"
-            if re.findall(
+            if findall(
                 pattern=r"example|test|demo",
                 string=user_data["email"],
                 flags=(
-                    re.IGNORECASE   |
-                    re.MULTILINE    |
-                    re.VERBOSE
+                    IGNORECASE   |
+                    MULTILINE    |
+                    VERBOSE
                 )
             ):
                 raise HTTPException(
@@ -197,6 +251,13 @@ async def update_user_v1(
                 }
             )
 
+    # We update specified user data in IAM first before safe falling back to our
+    # db. Any partial failures after an IAM rename is handled idempotently by the
+    # our auth micro-service
+    await update_iam_user(
+        user_id=str(user_id),
+        payload=user_data
+    )
 
     # Only perform UPDATE query if payload actually contains new data
     try:
@@ -232,7 +293,10 @@ async def delete_user_v1(
     user_id: UUID7,
     session: SessionDependency
 ) -> Any:
-    user_gone: Users | None = session.get(entity=Users, ident=user_id)
+    user_gone: Users | None = session.get(
+        entity=Users,
+        ident=user_id
+    )
 
     if user_gone is None:
         raise HTTPException(
@@ -240,6 +304,10 @@ async def delete_user_v1(
             detail="User Not Found!"
         )
     else:
+        # We delete specified user data in IAM first before safe falling back to
+        # our db
+        await delete_iam_user(user_id=str(user_id))
+
         session.delete(instance=user_gone)
         session.commit()
 

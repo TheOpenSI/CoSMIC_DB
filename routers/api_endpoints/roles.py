@@ -25,6 +25,7 @@ from ...cores.globals import (
     SYSTEM_ROLES
 )
 from ...apis.table_models.roles import Roles
+from ...apis.table_models.users import Users
 from ...apis.data_models.roles import (
     # For validation (Data Model)
     RoleCreate,
@@ -37,6 +38,11 @@ from ...types.api_responses.roles import (
     RolePublicResponse,
     RoleUpdateResponse,
     RoleDeleteResponse
+)
+from ...utils.auth_client import (
+    create_iam_role,
+    update_iam_role,
+    delete_iam_role
 )
 
 
@@ -101,10 +107,32 @@ async def create_role_v1(
                 }
             )
 
+    role_data: dict[str, Any] = role.model_dump(
+        mode="json",
+        exclude_unset=True
+    )
+    role_name: str = str(role_data["name"]).strip()
+
+    if not role_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "400 - Bad Request",
+                "message": "Field [name] cannot be empty."
+            }
+        )
+
+    role_data["name"] = role_name
+
+    # We create new role data in IAM first before safe falling back to our db
+    await create_iam_role(
+        name=role_name,
+        desc=role_data.get("desc")
+    )
 
     # Only perform INSERT query if payload actually contains new data
     role_db: Roles = Roles.model_validate(
-        obj=role,
+        obj=role_data,
         strict=True
     )
 
@@ -242,26 +270,50 @@ async def update_role_v1(
             )
 
     # Uniqueness check for 'name' field value against other roles
-    if "name" in role_data and role_data["name"] is not None:
-        role_stored_name: tuple[UUID7, str] | None = session.exec(
-            statement=select(
-                Roles.id,
-                Roles.name
-            )
-            .where(
-                Roles.name.ilike(role_data["name"]),
-                Roles.id != role_id
-            )
-        ).first()
+    if "name" in role_data:
+        if role_data["name"] is not None:
+            role_stored_name: tuple[UUID7, str] | None = session.exec(
+                statement=select(
+                    Roles.id,
+                    Roles.name
+                )
+                .where(
+                    Roles.name.ilike(role_data["name"]),
+                    Roles.id != role_id
+                )
+            ).first()
 
-        if role_stored_name:
+            if role_stored_name:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "status": "409 - Conflict",
+                        "message": f"[{role_stored_name[1]}] already exists."
+                    }
+                )
+
+        elif (
+            role_data["name"] is None
+            or
+            not str(role_data["name"]).strip()
+        ):
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
-                    "status": "409 - Conflict",
-                    "message": f"[{role_stored_name[1]}] already exists."
+                    "status": "400 - Bad Request",
+                    "message": "Field [name] cannot be empty."
                 }
             )
+
+        role_data["name"] = str(role_data["name"]).strip()
+
+    # We update specified role data in IAM first before safe falling back to our
+    # db. Any partial failures after an IAM rename is handled idempotently by the
+    # our auth micro-service
+    await update_iam_role(
+        name=role_db.name,
+        payload=role_data
+    )
 
     try:
         role_db.sqlmodel_update(obj=role_data)
@@ -303,11 +355,44 @@ async def delete_role_v1(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Role Not Found!"
         )
-    else:
-        session.delete(instance=role_gone)
-        session.commit()
 
-        return {
-            "success": True,
-            "deleted": role_gone
-        }
+    if role_gone.name.strip().lower() in SYSTEM_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "400 - Bad Request",
+                "message": f"Default system role [{role_gone.name}] cannot be deleted."
+            }
+        )
+
+    # TODO:
+    # This's my mistake when first drawing the ERD for CoSMIC as I'm not quite
+    # that familiar with db concepts yet. It supposed to be `ON DELETE RESTRICT`
+    # instead. This check is temporary implemented here until a ticket is created
+    # to address my mistake across all db tables.
+    assigned_user: UUID7 | None = session.exec(
+        statement=select(Users.id).where(
+            Users.role_id == role_gone.id
+        )
+    ).first()
+
+    if assigned_user is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "status": "409 - Conflict",
+                "message": f"Role [{role_gone.name}] is still assigned to one or more users."
+            }
+        )
+
+    # We delete specified role data in IAM first before safe falling back to
+    # our db
+    await delete_iam_role(name=role_gone.name)
+
+    session.delete(instance=role_gone)
+    session.commit()
+
+    return {
+        "success": True,
+        "deleted": role_gone
+    }
