@@ -152,24 +152,9 @@ async def update_user_v1(
                 }
             )
 
-    # 'name' is NOT NULL in the database and in the IAM. Reject a blank value
-    # before the IAM call so both stores stay consistent.
-    if "name" in user_data:
-        if (
-            user_data["name"] is None
-            or
-            not str(user_data["name"]).strip()
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "status": "400 - Bad Request",
-                    "message": "Field [name] cannot be empty."
-                }
-            )
-
-    # Resolve the role before touching the IAM so an unknown/custom role can
-    # never leave Keycloak pointing at a role the DB cannot store.
+    # Validation against 'role_id' field in payload. This's very important so
+    # that not a single unknown/custom role bypass the logic and leave IAM
+    # pointing at a role our db cannot store.
     if "role_id" in user_data:
         if user_data["role_id"] is None:
             raise HTTPException(
@@ -191,6 +176,21 @@ async def update_user_v1(
                 detail={
                     "status": "404 - Not Found",
                     "message": "Role Not Found!"
+                }
+            )
+
+    # Validation against 'name' field in payload
+    if "name" in user_data:
+        if (
+            user_data["name"] is None
+            or
+            not str(user_data["name"]).strip()
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "400 - Bad Request",
+                    "message": "Field [name] cannot be empty."
                 }
             )
 
@@ -251,9 +251,9 @@ async def update_user_v1(
                 }
             )
 
-
-    # IAM first: the local row is only a fallback mirror. If this call fails,
-    # neither store changes and the caller gets the IAM error.
+    # We update specified user data in IAM first before safe falling back to our
+    # db. Any partial failures after an IAM rename is handled idempotently by the
+    # our auth micro-service
     await update_iam_user(
         user_id=str(user_id),
         payload=user_data
@@ -304,8 +304,8 @@ async def delete_user_v1(
             detail="User Not Found!"
         )
     else:
-        # IAM first: deleting the fallback row only after the IAM accepted the
-        # deletion keeps Keycloak as the source of truth.
+        # We delete specified user data in IAM first before safe falling back to
+        # our db
         await delete_iam_user(user_id=str(user_id))
 
         session.delete(instance=user_gone)

@@ -7,8 +7,12 @@ from sqlmodel import (
 
 
 ### Type hints ###
+from collections.abc import Generator
 from sqlalchemy.engine import Engine
-from typing_extensions import Annotated, Any, Generator
+from typing_extensions import (
+    Annotated,
+    Any
+)
 
 
 ### Internal modules ###

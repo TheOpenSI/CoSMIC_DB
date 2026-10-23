@@ -28,9 +28,9 @@ from typing import Any
 from ..cores.configs import COSMIC_AUTH_URL
 
 
-_AUTH_USERS_PATH: str = "/api/v1/users"
-_AUTH_ROLES_PATH: str = "/api/v1/roles"
-_AUTH_TIMEOUT: float = 15.0
+_AUTH_IAM_USERS_PATH: str = "/api/v1/users"
+_AUTH_IAM_ROLES_PATH: str = "/api/v1/roles"
+_AUTH_REQUEST_TIMEOUT: float = 15.0
 
 
 def _status_label(status_code: int) -> str:
@@ -49,9 +49,12 @@ def _error_detail(response: Any) -> dict[str, Any]:
         payload = None
 
     detail: Any = (
-        payload.get("detail", payload)
-        if isinstance(payload, dict)
-        else payload
+        payload.get(
+            "detail",
+            payload
+        )
+        if   (isinstance(payload, dict))
+        else (payload)
     )
 
     if isinstance(detail, dict):
@@ -61,8 +64,8 @@ def _error_detail(response: Any) -> dict[str, Any]:
         "status": _status_label(response.status_code),
         "message": (
             str(detail)
-            if detail
-            else "The Auth service rejected the IAM request."
+            if   (detail)
+            else ("The auth micro-service rejected the IAM request.")
         )
     }
 
@@ -73,13 +76,14 @@ async def _request(
     payload:    dict[str, Any] | None = None
 ) -> Any:
     request_kwargs: dict[str, Any] = {}
+
     if payload is not None:
         request_kwargs["json"] = payload
 
     try:
         async with AsyncClient(
-            base_url=COSMIC_AUTH_URL.rstrip("/"),
-            timeout=_AUTH_TIMEOUT
+            base_url=str(COSMIC_AUTH_URL).rstrip("/"),
+            timeout=_AUTH_REQUEST_TIMEOUT
         ) as client:
             response = await client.request(
                 method=method,
@@ -92,7 +96,7 @@ async def _request(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={
                 "status": "502 - Bad Gateway",
-                "message": f"The Auth service is unreachable: {auth_exc}"
+                "message": f"The auth micro-service is unreachable: {auth_exc}"
             }
         )
 
@@ -118,7 +122,7 @@ async def update_iam_user(
 ) -> dict[str, Any]:
     return await _request(
         method="PATCH",
-        path=f"{_AUTH_USERS_PATH}/{quote(user_id, safe='')}",
+        path=f"{_AUTH_IAM_USERS_PATH}/{quote(string=user_id, safe='')}",
         payload=payload
     )
 
@@ -128,7 +132,7 @@ async def delete_iam_user(
 ) -> dict[str, Any]:
     return await _request(
         method="DELETE",
-        path=f"{_AUTH_USERS_PATH}/{quote(user_id, safe='')}"
+        path=f"{_AUTH_IAM_USERS_PATH}/{quote(string=user_id, safe='')}"
     )
 
 
@@ -138,7 +142,7 @@ async def create_iam_role(
 ) -> dict[str, Any]:
     return await _request(
         method="POST",
-        path=_AUTH_ROLES_PATH,
+        path=_AUTH_IAM_ROLES_PATH,
         payload={
             "name": name,
             "desc": desc
@@ -147,12 +151,12 @@ async def create_iam_role(
 
 
 async def update_iam_role(
-    current_name:   str,
-    payload:        dict[str, Any]
+    name:       str,
+    payload:    dict[str, Any]
 ) -> dict[str, Any]:
     return await _request(
         method="PATCH",
-        path=f"{_AUTH_ROLES_PATH}/{quote(current_name, safe='')}",
+        path=f"{_AUTH_IAM_ROLES_PATH}/{quote(string=name, safe='')}",
         payload=payload
     )
 
@@ -162,5 +166,5 @@ async def delete_iam_role(
 ) -> dict[str, Any]:
     return await _request(
         method="DELETE",
-        path=f"{_AUTH_ROLES_PATH}/{quote(name, safe='')}"
+        path=f"{_AUTH_IAM_ROLES_PATH}/{quote(string=name, safe='')}"
     )

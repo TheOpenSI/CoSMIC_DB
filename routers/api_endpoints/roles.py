@@ -108,7 +108,8 @@ async def create_role_v1(
             )
 
     role_data: dict[str, Any] = role.model_dump(
-        mode="json"
+        mode="json",
+        exclude_unset=True
     )
     role_name: str = str(role_data["name"]).strip()
 
@@ -123,7 +124,7 @@ async def create_role_v1(
 
     role_data["name"] = role_name
 
-    # IAM first: the local row is only a fallback mirror.
+    # We create new role data in IAM first before safe falling back to our db
     await create_iam_role(
         name=role_name,
         desc=role_data.get("desc")
@@ -269,29 +270,29 @@ async def update_role_v1(
             )
 
     # Uniqueness check for 'name' field value against other roles
-    if "name" in role_data and role_data["name"] is not None:
-        role_stored_name: tuple[UUID7, str] | None = session.exec(
-            statement=select(
-                Roles.id,
-                Roles.name
-            )
-            .where(
-                Roles.name.ilike(role_data["name"]),
-                Roles.id != role_id
-            )
-        ).first()
-
-        if role_stored_name:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "status": "409 - Conflict",
-                    "message": f"[{role_stored_name[1]}] already exists."
-                }
-            )
-
     if "name" in role_data:
-        if (
+        if role_data["name"] is not None:
+            role_stored_name: tuple[UUID7, str] | None = session.exec(
+                statement=select(
+                    Roles.id,
+                    Roles.name
+                )
+                .where(
+                    Roles.name.ilike(role_data["name"]),
+                    Roles.id != role_id
+                )
+            ).first()
+
+            if role_stored_name:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "status": "409 - Conflict",
+                        "message": f"[{role_stored_name[1]}] already exists."
+                    }
+                )
+
+        elif (
             role_data["name"] is None
             or
             not str(role_data["name"]).strip()
@@ -306,10 +307,11 @@ async def update_role_v1(
 
         role_data["name"] = str(role_data["name"]).strip()
 
-    # IAM first: the local row is only a fallback mirror. A partial failure
-    # after a Keycloak rename is handled idempotently by the Auth service.
+    # We update specified role data in IAM first before safe falling back to our
+    # db. Any partial failures after an IAM rename is handled idempotently by the
+    # our auth micro-service
     await update_iam_role(
-        current_name=role_db.name,
+        name=role_db.name,
         payload=role_data
     )
 
@@ -363,8 +365,11 @@ async def delete_role_v1(
             }
         )
 
-    # The FK is ON DELETE CASCADE, so deleting a referenced role would silently
-    # delete its users as well. Refuse instead.
+    # TODO:
+    # This's my mistake when first drawing the ERD for CoSMIC as I'm not quite
+    # that familiar with db concepts yet. It supposed to be `ON DELETE RESTRICT`
+    # instead. This check is temporary implemented here until a ticket is created
+    # to address my mistake across all db tables.
     assigned_user: UUID7 | None = session.exec(
         statement=select(Users.id).where(
             Users.role_id == role_gone.id
@@ -380,7 +385,8 @@ async def delete_role_v1(
             }
         )
 
-    # IAM first: the local row is only a fallback mirror.
+    # We delete specified role data in IAM first before safe falling back to
+    # our db
     await delete_iam_role(name=role_gone.name)
 
     session.delete(instance=role_gone)
